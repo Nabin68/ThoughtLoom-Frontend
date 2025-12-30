@@ -1,4 +1,13 @@
 import 'package:flutter/material.dart';
+import 'mcq_flow_screen.dart';
+
+// ✅ Add enum
+enum ReasonType {
+  careerConfusion,
+  stuckBetweenChoices,
+  overwhelmed,
+  clarityBeforeStep,
+}
 
 class ReasonScreen extends StatefulWidget {
   const ReasonScreen({super.key});
@@ -29,12 +38,28 @@ class _ReasonScreenState extends State<ReasonScreen> {
     },
   ];
 
+  // ✅ Map index → reason
+  ReasonType get selectedReason {
+    switch (selectedIndex) {
+      case 0:
+        return ReasonType.careerConfusion;
+      case 1:
+        return ReasonType.stuckBetweenChoices;
+      case 2:
+        return ReasonType.overwhelmed;
+      case 3:
+        return ReasonType.clarityBeforeStep;
+      default:
+        return ReasonType.overwhelmed;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Get screen size for responsive design
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
-    
+
     // Calculate responsive spacing
     final topPadding = screenHeight * 0.03;
     final horizontalPadding = screenWidth * 0.06;
@@ -49,7 +74,6 @@ class _ReasonScreenState extends State<ReasonScreen> {
               fit: BoxFit.cover,
             ),
           ),
-
           SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -68,7 +92,6 @@ class _ReasonScreenState extends State<ReasonScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             SizedBox(height: topPadding),
-
                             // 🔹 Title - Responsive font size
                             Text(
                               "What brings you\nhere today?",
@@ -80,9 +103,7 @@ class _ReasonScreenState extends State<ReasonScreen> {
                                 letterSpacing: -0.5,
                               ),
                             ),
-
                             SizedBox(height: screenHeight * 0.015),
-
                             // 🔹 Subtitle - Responsive font size
                             Text(
                               "Choose what best matches how you're\nfeeling right now.",
@@ -92,13 +113,10 @@ class _ReasonScreenState extends State<ReasonScreen> {
                                 height: 1.4,
                               ),
                             ),
-
                             SizedBox(height: screenHeight * 0.04),
-
                             // 🔹 Options list with flexible sizing
                             ...List.generate(options.length, (index) {
                               final isSelected = index == selectedIndex;
-
                               return GestureDetector(
                                 onTap: () {
                                   setState(() {
@@ -182,11 +200,9 @@ class _ReasonScreenState extends State<ReasonScreen> {
                                 ),
                               );
                             }),
-
                             // 🔹 Spacer with minimum height
                             SizedBox(height: screenHeight * 0.03),
                             const Spacer(),
-
                             // 🔹 Continue button with enhanced shadow
                             Center(
                               child: Container(
@@ -215,7 +231,12 @@ class _ReasonScreenState extends State<ReasonScreen> {
                                 ),
                                 child: ElevatedButton(
                                   onPressed: () {
-                                    // TODO: Go to next flow (chat / analysis screen)
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => MCQFlowScreen(reason: selectedReason),
+                                      ),
+                                    );
                                   },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF6F8F9B),
@@ -238,7 +259,6 @@ class _ReasonScreenState extends State<ReasonScreen> {
                                 ),
                               ),
                             ),
-
                             SizedBox(height: screenHeight * 0.02),
                           ],
                         ),
