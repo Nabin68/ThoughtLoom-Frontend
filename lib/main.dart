@@ -1,5 +1,8 @@
+//main.dart
+
 import 'package:flutter/material.dart';
 import 'screens/landing_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   runApp(const ThoughtLoomApp());
@@ -10,9 +13,10 @@ class ThoughtLoomApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: LandingScreen(),
+      theme: AppTheme.theme,
+      home: const LandingScreen(),
     );
   }
 }

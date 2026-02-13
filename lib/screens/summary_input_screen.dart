@@ -1,7 +1,9 @@
+//summary_input_screen.dart
+
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../screens/reason_screen.dart'; // Import for ReasonType enum
+import 'loading_screen.dart';
+
 
 class SummaryInputScreen extends StatefulWidget {
   final ReasonType reason;
@@ -19,7 +21,6 @@ class SummaryInputScreen extends StatefulWidget {
 
 class _SummaryInputScreenState extends State<SummaryInputScreen> {
   final TextEditingController controller = TextEditingController();
-  bool isSubmitting = false;
 
   @override
   void dispose() {
@@ -36,8 +37,8 @@ class _SummaryInputScreenState extends State<SummaryInputScreen> {
     };
   }
 
-  // Send data to FastAPI backend
-  Future<void> submitToLLM() async {
+  // Navigate to loading screen with payload
+  void submitToLLM() {
     if (controller.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -48,76 +49,14 @@ class _SummaryInputScreenState extends State<SummaryInputScreen> {
       return;
     }
 
-    setState(() {
-      isSubmitting = true;
-    });
-
-    try {
-      // 🔥 Replace with your actual FastAPI endpoint
-      const String apiUrl = 'http://localhost:8000/api/analyze';
-      // For Android emulator use: http://10.0.2.2:8000/api/analyze
-      // For real device use your computer's IP: http://192.168.x.x:8000/api/analyze
-
-      debugPrint('=== SENDING TO API ===');
-      debugPrint('URL: $apiUrl');
-      debugPrint('Payload: ${jsonEncode(finalPayload)}');
-      debugPrint('=====================');
-
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(finalPayload),
-      );
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final result = jsonDecode(response.body);
-        
-        debugPrint('=== API RESPONSE ===');
-        debugPrint(result.toString());
-        debugPrint('===================');
-
-        // TODO: Navigate to InsightScreen with result
-        // Navigator.pushReplacement(
-        //   context,
-        //   MaterialPageRoute(
-        //     builder: (_) => InsightScreen(result: result),
-        //   ),
-        // );
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Analysis complete! Processing insights...'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        throw Exception('Server error: ${response.statusCode}');
-      }
-    } catch (e) {
-      debugPrint('=== ERROR ===');
-      debugPrint(e.toString());
-      debugPrint('=============');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          isSubmitting = false;
-        });
-      }
-    }
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LoadingScreen(
+          payload: finalPayload,
+        ),
+      ),
+    );
   }
 
   @override
@@ -290,7 +229,7 @@ class _SummaryInputScreenState extends State<SummaryInputScreen> {
                       ],
                     ),
                     child: ElevatedButton(
-                      onPressed: isSubmitting ? null : submitToLLM,
+                      onPressed: submitToLLM,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF6F8F9B),
                         foregroundColor: Colors.white,
@@ -301,34 +240,24 @@ class _SummaryInputScreenState extends State<SummaryInputScreen> {
                         shadowColor: Colors.transparent,
                         padding: EdgeInsets.zero,
                       ),
-                      child: isSubmitting
-                          ? SizedBox(
-                              width: screenWidth * 0.05,
-                              height: screenWidth * 0.05,
-                              child: const CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  "Get My Insights",
-                                  style: TextStyle(
-                                    fontSize: screenWidth * 0.042,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                                SizedBox(width: screenWidth * 0.02),
-                                Icon(
-                                  Icons.arrow_forward,
-                                  size: screenWidth * 0.05,
-                                ),
-                              ],
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            "Get My Insights",
+                            style: TextStyle(
+                              fontSize: screenWidth * 0.042,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
                             ),
+                          ),
+                          SizedBox(width: screenWidth * 0.02),
+                          Icon(
+                            Icons.arrow_forward,
+                            size: screenWidth * 0.05,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
