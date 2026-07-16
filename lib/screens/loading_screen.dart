@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import '../config/api_config.dart';
 import 'insight_screen.dart';
 
 class LoadingScreen extends StatefulWidget {
@@ -51,59 +52,58 @@ class _LoadingScreenState extends State<LoadingScreen> {
 
   Future<void> _callAPI() async {
     try {
-      const String apiUrl =
-        'https://thoughtloom-backend-6wmm.onrender.com/api/analyze';
-
-
-      debugPrint('=== CALLING API ===');
-      debugPrint('Payload: ${jsonEncode(widget.payload)}');
-
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(widget.payload),
-      );
+      final response = await http
+          .post(
+            ApiConfig.analyzeUrl,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(widget.payload),
+          )
+          .timeout(ApiConfig.requestTimeout);
 
       if (!mounted) return;
 
-      debugPrint('=== API RESPONSE ===');
-      debugPrint('Status: ${response.statusCode}');
-      debugPrint('Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final result = jsonDecode(response.body);
-
-        // Small delay to ensure user sees the loading animation
-        await Future.delayed(const Duration(milliseconds: 500));
-
-        if (!mounted) return;
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => InsightScreen(
-              result: result,
-            ),
-          ),
+      if (response.statusCode != 200) {
+        debugPrint('Analyze failed: ${response.statusCode} ${response.body}');
+        _showError(
+          "ThoughtLoom couldn't work through this one. Please try again.",
         );
-      } else {
-        throw Exception('Server error ${response.statusCode}');
+        return;
       }
+
+      final result = jsonDecode(response.body);
+
+      // Small delay to ensure user sees the loading animation
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InsightScreen(
+            result: result,
+          ),
+        ),
+      );
+    } on TimeoutException {
+      _showError("This is taking longer than usual. Please try again.");
     } catch (e) {
-      debugPrint('=== ERROR ===');
-      debugPrint(e.toString());
-
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
+      debugPrint('Analyze request failed: $e');
+      _showError("We couldn't reach ThoughtLoom. Check your connection and try again.");
     }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override

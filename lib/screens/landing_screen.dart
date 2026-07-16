@@ -1,7 +1,7 @@
 //landing_screen.dart
 
 import 'package:flutter/material.dart';
-import 'reason_screen.dart';
+import 'register_screen.dart';
 
 
 class LandingScreen extends StatefulWidget {
@@ -107,7 +107,7 @@ class _LandingScreenState extends State<LandingScreen>
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => const ReasonScreen(),
+                                  builder: (context) => const RegisterScreen(),
                                 ),
                               );
                             },

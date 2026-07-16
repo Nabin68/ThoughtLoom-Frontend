@@ -45,5 +45,12 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Both are required for dictation on the describe-your-problem screen.
+	     iOS kills the app on first use if either string is missing, so these
+	     are load-bearing rather than cosmetic. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ThoughtLoom uses the microphone so you can talk through your situation instead of typing it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>ThoughtLoom turns what you say into text so you can describe your situation out loud.</string>
 </dict>
 </plist>

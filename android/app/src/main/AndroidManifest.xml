@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Dictation on the describe-your-problem screen. Requested at runtime by
+         speech_to_text when the user first reaches for the mic; declining only
+         costs them the mic button, never the text field. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="thoughtloom"
         android:name="${applicationName}"
@@ -40,6 +46,12 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Android 11+ package visibility. Without this the recogniser is
+             invisible to us and speech_to_text reports dictation unavailable on
+             every device, however many recognisers are installed. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
         </intent>
     </queries>
 </manifest>
