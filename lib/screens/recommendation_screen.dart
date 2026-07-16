@@ -10,19 +10,32 @@ import '../services/backend.dart';
 import '../services/chat_completion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
+import '../widgets/app_button.dart';
+import '../widgets/app_card.dart';
+import '../widgets/app_header.dart';
 import '../widgets/error_banner.dart';
-import '../widgets/primary_button.dart';
+import '../widgets/rich_body.dart';
 import 'continued_chat_screen.dart';
 
 /// The answer.
 ///
 /// The API has already written it to `messages` and moved the chat to
 /// `awaiting_follow_up` by the time this renders — so a user who closes the app
-/// here has not lost it, and Prompt 6 will find it.
+/// here has not lost it.
 ///
 /// Leaving completes the chat. That write is direct Flutter → Supabase: it is a
-/// status flag on a row the user owns, RLS covers it, and routing it through
-/// the API would be a network round trip to set a boolean.
+/// status flag on a row the user owns, RLS covers it, and routing it through the
+/// API would be a network round trip to set a boolean.
+///
+/// ### Why this screen looks different now
+///
+/// It is the one screen the whole app exists to produce, and it used to render
+/// as three hundred words of undifferentiated prose in a single `Text` — the
+/// position buried somewhere in the middle, indistinguishable from the reasoning
+/// around it. The model is now asked for a `headline` it has to commit to, and a
+/// body in a Markdown subset, so the answer can be *seen* as well as read: the
+/// verdict at the top in large type, the reasoning under it with the load-bearing
+/// phrases actually bold, and one accented callout for the thing not to miss.
 class RecommendationScreen extends StatefulWidget {
   final Chat chat;
 
@@ -89,9 +102,7 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final horizontalPadding = screenWidth * 0.06;
+    final ready = _error == null && !_loading && _recommendation != null;
 
     // Intercepts Back — the system gesture and the button — so leaving by any
     // route ends the chat, rather than only the one we thought of.
@@ -103,39 +114,10 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
       child: AppBackground(
         child: Column(
           children: [
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: horizontalPadding,
-                vertical: screenHeight * 0.02,
-              ),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: _finish,
-                    behavior: HitTestBehavior.opaque,
-                    child: Padding(
-                      padding: EdgeInsets.only(right: screenWidth * 0.03),
-                      child: Icon(
-                        Icons.arrow_back,
-                        size: screenWidth * 0.055,
-                        color: AppTheme.textLight,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      widget.chat.category.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.038,
-                        color: AppTheme.textLight,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            AppHeader(
+              title: widget.chat.category.label,
+              subtitle: 'What I think',
+              onBack: _finish,
             ),
             Expanded(
               child: _error != null
@@ -148,37 +130,37 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
                       ? const _Working()
                       : _buildAnswer(),
             ),
-            if (_error == null && !_loading && _recommendation != null)
+            if (ready)
               Padding(
                 padding: EdgeInsets.fromLTRB(
-                  horizontalPadding,
+                  AppTheme.s5,
                   0,
-                  horizontalPadding,
-                  screenHeight * 0.02,
+                  AppTheme.s5,
+                  AppTheme.s4,
                 ),
                 child: Column(
                   children: [
-                    PrimaryButton(
-                      label: 'Keep chatting',
-                      icon: Icons.chat_bubble_outline,
-                      onPressed: () => Navigator.push(
+                    AppButton(
+                      label: 'Push back on this',
+                      icon: Icons.chat_bubble_outline_rounded,
+                      // pushReplacement, not push. The chat screen opens with
+                      // this very recommendation as its first bubble, so leaving
+                      // it should go home rather than reveal a second, frozen
+                      // copy of the advice with its own "leave" button — and it
+                      // lets ContinuedChatScreen simply pop, which is what makes
+                      // the same screen behave correctly when it is reached from
+                      // history instead.
+                      onPressed: () => Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
                           builder: (_) => ContinuedChatScreen(chat: widget.chat),
                         ),
                       ),
                     ),
-                    SizedBox(height: screenHeight * 0.008),
-                    TextButton(
+                    SizedBox(height: AppTheme.s2),
+                    AppButton.quiet(
+                      label: "That's enough for now",
                       onPressed: _finish,
-                      child: Text(
-                        "That's enough for now",
-                        style: TextStyle(
-                          fontSize: screenWidth * 0.038,
-                          color: AppTheme.textLight,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
                     ),
                   ],
                 ),
@@ -190,181 +172,176 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
   }
 
   Widget _buildAnswer() {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
     final result = _recommendation!;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.06),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Here is what I think',
-              style: TextStyle(
-                fontSize: screenWidth * 0.08,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textDark,
-                height: 1.2,
-                letterSpacing: -0.5,
+      padding: EdgeInsets.fromLTRB(
+        AppTheme.s5,
+        AppTheme.s2,
+        AppTheme.s5,
+        AppTheme.s6,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // The verdict, alone, in display type. Against a server that predates
+          // the headline field this is simply absent and the body leads, exactly
+          // as it did before.
+          if (result.headline.isNotEmpty) ...[
+            Text(result.headline, style: AppTheme.display(context)),
+            SizedBox(height: AppTheme.s5),
+          ],
+          AppCard(
+            child: RichBody(
+              markdown: result.text,
+              baseStyle: AppTheme.body(context).copyWith(fontSize: 15.5),
+            ),
+          ),
+          if (result.nextSteps.isNotEmpty) ...[
+            SizedBox(height: AppTheme.s4),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SectionLabel(
+                    'Where to start',
+                    icon: Icons.play_arrow_rounded,
+                  ),
+                  SizedBox(height: AppTheme.s4),
+                  for (var i = 0; i < result.nextSteps.length; i++) ...[
+                    _Step(number: i + 1, text: result.nextSteps[i]),
+                    if (i != result.nextSteps.length - 1)
+                      SizedBox(height: AppTheme.s4),
+                  ],
+                ],
               ),
             ),
-            SizedBox(height: screenHeight * 0.025),
-            _Card(
-              child: Text(
-                result.text,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.042,
-                  color: AppTheme.textOnCard,
-                  height: 1.6,
-                ),
-              ),
-            ),
-            if (result.nextSteps.isNotEmpty) ...[
-              SizedBox(height: screenHeight * 0.02),
-              _Card(
-                child: Column(
+          ],
+          if (result.confidence.isNotEmpty) ...[
+            SizedBox(height: AppTheme.s4),
+            _Confidence(text: result.confidence),
+          ],
+          // Only present when the answer actually needed research, which is a
+          // minority of the time — and when it did, saying so is the difference
+          // between advice and a claim.
+          if (result.sources.isNotEmpty) ...[
+            SizedBox(height: AppTheme.s5),
+            const SectionLabel('What I looked up', icon: Icons.travel_explore),
+            SizedBox(height: AppTheme.s3),
+            for (final source in result.sources)
+              Padding(
+                padding: EdgeInsets.only(bottom: AppTheme.s2),
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Where to start',
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.045,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textOnCard,
-                        letterSpacing: -0.2,
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5),
+                      child: Icon(
+                        Icons.link_rounded,
+                        size: 13,
+                        color: AppTheme.textFaint,
                       ),
                     ),
-                    SizedBox(height: screenWidth * 0.035),
-                    for (var i = 0; i < result.nextSteps.length; i++) ...[
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: screenWidth * 0.055,
-                            height: screenWidth * 0.055,
-                            alignment: Alignment.center,
-                            decoration: const BoxDecoration(
-                              color: AppTheme.primary,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Text(
-                              '${i + 1}',
-                              style: TextStyle(
-                                fontSize: screenWidth * 0.03,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          SizedBox(width: screenWidth * 0.03),
-                          Expanded(
-                            child: Text(
-                              result.nextSteps[i],
-                              style: TextStyle(
-                                fontSize: screenWidth * 0.038,
-                                color: AppTheme.textOnCard,
-                                height: 1.45,
-                              ),
-                            ),
-                          ),
-                        ],
+                    SizedBox(width: AppTheme.s2),
+                    Expanded(
+                      child: Text(
+                        source.title.isEmpty ? source.url : source.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTheme.meta(context),
                       ),
-                      if (i != result.nextSteps.length - 1)
-                        SizedBox(height: screenWidth * 0.035),
-                    ],
+                    ),
                   ],
                 ),
               ),
-            ],
-            if (result.confidence.isNotEmpty) ...[
-              SizedBox(height: screenHeight * 0.02),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: screenWidth * 0.04,
-                    color: AppTheme.textLight,
-                  ),
-                  SizedBox(width: screenWidth * 0.025),
-                  Expanded(
-                    child: Text(
-                      result.confidence,
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.034,
-                        color: AppTheme.textLight,
-                        height: 1.4,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            // Only present when the answer actually needed research, which is a
-            // minority of the time — and when it did, saying so is the
-            // difference between advice and a claim.
-            if (result.sources.isNotEmpty) ...[
-              SizedBox(height: screenHeight * 0.025),
-              Text(
-                'What I looked up',
-                style: TextStyle(
-                  fontSize: screenWidth * 0.036,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textLight,
-                ),
-              ),
-              SizedBox(height: screenWidth * 0.02),
-              for (final source in result.sources)
-                Padding(
-                  padding: EdgeInsets.only(bottom: screenWidth * 0.015),
-                  child: Text(
-                    '· ${source.title.isEmpty ? source.url : source.title}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: screenWidth * 0.032,
-                      color: AppTheme.textLight,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-            ],
-            SizedBox(height: screenHeight * 0.03),
           ],
-        ),
+        ],
       ),
     );
   }
 }
 
-class _Card extends StatelessWidget {
-  final Widget child;
+class _Step extends StatelessWidget {
+  final int number;
+  final String text;
 
-  const _Card({required this.child});
+  const _Step({required this.number, required this.text});
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final scale = AppTheme.scaleOf(context);
 
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24 * scale,
+          height: 24 * scale,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+            color: AppTheme.primary,
+            shape: BoxShape.circle,
+          ),
+          child: Text(
+            '$number',
+            style: TextStyle(
+              fontSize: 12 * scale,
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        SizedBox(width: AppTheme.s3),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: RichBody(
+              markdown: text,
+              baseStyle: AppTheme.body(context),
+              allowCallouts: false,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// How sure it is, and what would change its mind.
+///
+/// Deliberately quiet and deliberately present. A model that takes a hard
+/// position — which is what this app's prompts now demand — owes the reader the
+/// size of its own doubt, or the position is a bluff.
+class _Confidence extends StatelessWidget {
+  final String text;
+
+  const _Confidence({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: EdgeInsets.all(screenWidth * 0.055),
+      padding: EdgeInsets.all(AppTheme.s3),
       decoration: BoxDecoration(
-        color: AppTheme.cardBg.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            offset: const Offset(0, 4),
-            blurRadius: 12,
+        color: AppTheme.primarySoft.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(AppTheme.rSm),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline_rounded, size: 15, color: AppTheme.textLight),
+          SizedBox(width: AppTheme.s2),
+          Expanded(
+            child: Text(
+              text,
+              style: AppTheme.meta(context).copyWith(
+                color: AppTheme.textLight,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
           ),
         ],
       ),
-      child: child,
     );
   }
 }
@@ -407,34 +384,30 @@ class _WorkingState extends State<_Working> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Center(
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.08),
+        padding: EdgeInsets.symmetric(horizontal: AppTheme.s8),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            SizedBox(
-              width: screenWidth * 0.1,
-              height: screenWidth * 0.1,
-              child: const CircularProgressIndicator(
+            const SizedBox(
+              width: 38,
+              height: 38,
+              child: CircularProgressIndicator(
                 strokeWidth: 3,
                 valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
               ),
             ),
-            SizedBox(height: screenWidth * 0.07),
+            SizedBox(height: AppTheme.s6),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 400),
               child: Text(
                 _lines[_index],
                 key: ValueKey(_index),
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.042,
+                style: AppTheme.body(context).copyWith(
                   color: AppTheme.textDark,
                   fontWeight: FontWeight.w600,
-                  height: 1.4,
                 ),
               ),
             ),
@@ -458,45 +431,26 @@ class _Failure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Center(
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.06),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ErrorBanner(message: message),
-              SizedBox(height: screenHeight * 0.025),
-              Text(
-                'Your conversation is saved. Trying again picks up\nexactly where it left off.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.036,
-                  color: AppTheme.textLight,
-                  height: 1.4,
-                ),
-              ),
-              SizedBox(height: screenHeight * 0.025),
-              if (onRetry != null)
-                PrimaryButton(label: 'Try again', onPressed: onRetry),
-              SizedBox(height: screenHeight * 0.012),
-              TextButton(
-                onPressed: onLeave,
-                child: Text(
-                  'Back to start',
-                  style: TextStyle(
-                    fontSize: screenWidth * 0.038,
-                    color: AppTheme.textLight,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
+        padding: EdgeInsets.symmetric(horizontal: AppTheme.s5),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ErrorBanner(message: message),
+            SizedBox(height: AppTheme.s5),
+            Text(
+              'Your conversation is saved. Trying again picks up exactly where '
+              'it left off.',
+              textAlign: TextAlign.center,
+              style: AppTheme.secondary(context),
+            ),
+            SizedBox(height: AppTheme.s5),
+            if (onRetry != null) AppButton(label: 'Try again', onPressed: onRetry),
+            SizedBox(height: AppTheme.s2),
+            AppButton.quiet(label: 'Back to start', onPressed: onLeave),
+          ],
         ),
       ),
     );

@@ -8,15 +8,26 @@ import '../services/data_service.dart';
 import '../services/session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
+import '../widgets/app_header.dart';
 import '../widgets/error_banner.dart';
 import 'history_screen.dart';
 import 'intake_flow_screen.dart';
+import 'profile_screen.dart';
 
 /// Home for a signed-in user with a finished profile: pick a category, or go
 /// look at what you have already thought through.
 ///
 /// Rendered directly by `AuthGate` — it is the first route, so everything else
 /// stacks on top and `popUntil((r) => r.isFirst)` comes back here.
+///
+/// ### Sign-out is not here any more
+///
+/// It used to be a bare `TextButton` at the bottom of this screen — a grey word
+/// floating on the background, with no edge and a tap target under 30pt. It read
+/// as a caption, not a control, which is exactly what it was reported as. It now
+/// lives in [ProfileScreen], because it is an account action and that is the
+/// account screen; the way in is the avatar in the header, where every app has
+/// trained people to look for it.
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -42,10 +53,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       // The chat row is created here, on the tap, before a single question is
-      // asked — per the spec, and it is also what lets the intake screens write
-      // messages against a real chat_id from their first answer. The cost is
-      // that abandoning the flow leaves an empty in-progress chat; history
-      // already renders those honestly as "Unfinished".
+      // asked — which is what lets the intake screens write messages against a
+      // real chat_id from their first answer. The cost is that abandoning the
+      // flow leaves an empty in-progress chat; history renders those honestly as
+      // "Unfinished".
       final chat = await Backend.data.createChat(
         userId: session.user.id,
         category: category,
@@ -74,103 +85,104 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final session = SessionScope.of(context);
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
     final name = (session.profile.displayName ?? '').trim();
     final greeting = name.isEmpty ? 'Hello' : 'Hello, $name';
 
     return AppBackground(
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.06),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(height: screenHeight * 0.025),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppTheme.s5,
+              AppTheme.s3,
+              AppTheme.s3,
+              0,
+            ),
+            child: Row(
               children: [
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+                ),
+                SizedBox(width: AppTheme.s2),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        greeting,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: screenWidth * 0.08,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textDark,
-                          height: 1.2,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-                      SizedBox(height: screenHeight * 0.008),
-                      Text(
-                        'What is on your mind?',
-                        style: TextStyle(
-                          fontSize: screenWidth * 0.038,
-                          color: AppTheme.textLight,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    'ThoughtLoom',
+                    style: AppTheme.label(context).copyWith(
+                      color: AppTheme.textDark,
+                      letterSpacing: -0.3,
+                    ),
                   ),
                 ),
-                _HistoryButton(
-                  onTap: () => Navigator.push(
+                HeaderIconButton(
+                  icon: Icons.history_rounded,
+                  tooltip: 'Your past chats',
+                  onPressed: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      // Handed down rather than read from SessionScope inside:
-                      // a pushed route is not below the scope. See HistoryScreen.
+                      // Handed down rather than read from SessionScope inside: a
+                      // pushed route is not below the scope. See HistoryScreen.
                       builder: (_) => HistoryScreen(userId: session.user.id),
+                    ),
+                  ),
+                ),
+                HeaderIconButton(
+                  icon: Icons.person_outline_rounded,
+                  tooltip: 'Profile and sign out',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ProfileScreen(
+                        user: session.user,
+                        profile: session.profile,
+                        onSaved: session.reload,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
-            SizedBox(height: screenHeight * 0.03),
-            if (_error != null) ...[
-              ErrorBanner(message: _error!),
-              SizedBox(height: screenHeight * 0.02),
-            ],
-            Expanded(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: Column(
-                  children: [
-                    for (final category in ChatCategory.values)
-                      _CategoryCard(
-                        category: category,
-                        busy: _starting == category,
-                        // Null while any card is starting, which disables all
-                        // four rather than only the one that was tapped.
-                        onTap: _starting == null
-                            ? () => _start(category)
-                            : null,
-                      ),
-                  ],
-                ),
+          ),
+          Expanded(
+            child: ListView(
+              physics: const BouncingScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(
+                AppTheme.s5,
+                AppTheme.s5,
+                AppTheme.s5,
+                AppTheme.s8,
               ),
-            ),
-            SizedBox(height: screenHeight * 0.01),
-            Center(
-              child: TextButton(
-                onPressed: () => Backend.auth.signOut().catchError((_) {}),
-                child: Text(
-                  'Sign out',
-                  style: TextStyle(
-                    fontSize: screenWidth * 0.038,
-                    color: AppTheme.textLight,
-                    fontWeight: FontWeight.w600,
+              children: [
+                Text(
+                  greeting,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTheme.display(context),
+                ),
+                SizedBox(height: AppTheme.s2),
+                Text(
+                  'What is on your mind?',
+                  style: AppTheme.secondary(context),
+                ),
+                SizedBox(height: AppTheme.s6),
+                if (_error != null) ...[
+                  ErrorBanner(message: _error!),
+                  SizedBox(height: AppTheme.s4),
+                ],
+                for (final category in ChatCategory.values)
+                  _CategoryCard(
+                    category: category,
+                    busy: _starting == category,
+                    // Null while any card is starting, which disables all four
+                    // rather than only the one that was tapped.
+                    onTap: _starting == null ? () => _start(category) : null,
                   ),
-                ),
-              ),
+              ],
             ),
-            SizedBox(height: screenHeight * 0.01),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -199,7 +211,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
     };
 
-/// One tappable topic, in the cream card the option rows use.
+/// One tappable topic.
 class _CategoryCard extends StatelessWidget {
   final ChatCategory category;
   final bool busy;
@@ -213,150 +225,102 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final scale = AppTheme.scaleOf(context);
     final presentation = _presentation(category);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: EdgeInsets.only(bottom: screenHeight * 0.018),
-        padding: EdgeInsets.symmetric(
-          horizontal: screenWidth * 0.05,
-          vertical: screenHeight * 0.022,
-        ),
+    return Padding(
+      padding: EdgeInsets.only(bottom: AppTheme.s3),
+      child: DecoratedBox(
         decoration: BoxDecoration(
-          color: busy
-              ? AppTheme.selected
-              : AppTheme.cardBg.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(AppTheme.pillRadius),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              offset: const Offset(0, 4),
-              blurRadius: 12,
-            ),
-            BoxShadow(
-              color: Colors.white.withValues(alpha: busy ? 0.1 : 0.4),
-              offset: const Offset(0, -1),
-              blurRadius: 2,
-            ),
-          ],
+          borderRadius: BorderRadius.circular(AppTheme.rLg),
+          boxShadow: AppTheme.shadowCard,
         ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: screenWidth * 0.07,
-              height: screenWidth * 0.07,
-              child: busy
-                  ? Padding(
-                      padding: EdgeInsets.all(screenWidth * 0.008),
-                      child: const CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : Icon(
-                      presentation.icon,
-                      size: screenWidth * 0.065,
-                      color: AppTheme.textOnCard,
-                    ),
-            ),
-            SizedBox(width: screenWidth * 0.04),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: Material(
+          color: busy ? AppTheme.primary : AppTheme.cardBg,
+          borderRadius: BorderRadius.circular(AppTheme.rLg),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            splashColor: AppTheme.primary.withValues(alpha: 0.12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: EdgeInsets.symmetric(
+                horizontal: AppTheme.s4,
+                vertical: AppTheme.s4 + 2,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppTheme.rLg),
+                border: Border.all(
+                  color: busy ? AppTheme.primary : AppTheme.border,
+                ),
+              ),
+              child: Row(
                 children: [
-                  Text(
-                    category.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: screenWidth * 0.045,
-                      color: busy ? Colors.white : AppTheme.textOnCard,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.2,
+                  Container(
+                    width: 42 * scale,
+                    height: 42 * scale,
+                    decoration: BoxDecoration(
+                      // A tinted tile behind the glyph rather than a bare icon:
+                      // it gives the row a fixed left edge to align to, and it is
+                      // the difference between a list of cards and a list of
+                      // sentences.
+                      color: busy
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : AppTheme.primarySoft,
+                      borderRadius: BorderRadius.circular(AppTheme.rSm),
+                    ),
+                    child: busy
+                        ? Padding(
+                            padding: EdgeInsets.all(11 * scale),
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : Icon(
+                            presentation.icon,
+                            size: 21 * scale,
+                            color: AppTheme.primary,
+                          ),
+                  ),
+                  SizedBox(width: AppTheme.s3),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          category.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.heading(context).copyWith(
+                            color: busy ? Colors.white : AppTheme.textOnCard,
+                          ),
+                        ),
+                        SizedBox(height: AppTheme.s1),
+                        Text(
+                          presentation.blurb,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.meta(context).copyWith(
+                            color: busy
+                                ? Colors.white.withValues(alpha: 0.85)
+                                : AppTheme.textFaint,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  SizedBox(height: screenWidth * 0.008),
-                  Text(
-                    presentation.blurb,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: screenWidth * 0.033,
-                      color: busy
-                          ? Colors.white.withValues(alpha: 0.85)
-                          : AppTheme.textLight,
-                      height: 1.3,
-                    ),
+                  SizedBox(width: AppTheme.s2),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    size: 18 * scale,
+                    color: busy ? Colors.white : AppTheme.textFaint,
                   ),
                 ],
               ),
             ),
-            Icon(
-              Icons.arrow_forward,
-              size: screenWidth * 0.045,
-              color: busy
-                  ? Colors.white
-                  : AppTheme.textLight.withValues(alpha: 0.6),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The way into history. A card would compete with the four topics for the eye,
-/// so it sits up in the header as an affordance rather than an option.
-class _HistoryButton extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _HistoryButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: screenWidth * 0.04,
-          vertical: screenWidth * 0.025,
-        ),
-        decoration: BoxDecoration(
-          color: AppTheme.cardBg.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(AppTheme.pillRadius),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              offset: const Offset(0, 4),
-              blurRadius: 12,
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.history,
-              size: screenWidth * 0.045,
-              color: AppTheme.textOnCard,
-            ),
-            SizedBox(width: screenWidth * 0.015),
-            Text(
-              'Past',
-              style: TextStyle(
-                fontSize: screenWidth * 0.034,
-                color: AppTheme.textOnCard,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

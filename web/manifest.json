@@ -1,11 +1,11 @@
 {
-    "name": "thoughtloom",
-    "short_name": "thoughtloom",
+    "name": "ThoughtLoom",
+    "short_name": "ThoughtLoom",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#F5F3EE",
     "theme_color": "#F5F3EE",
-    "description": "A new Flutter project.",
+    "description": "ThoughtLoom — weave clarity into your decisions.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

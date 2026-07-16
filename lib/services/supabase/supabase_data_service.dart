@@ -147,6 +147,23 @@ class SupabaseDataService extends DataService {
       }, 'save that chat');
 
   @override
+  Future<Chat> reopenChat(String chatId) => _guard(() async {
+        final row = await _client
+            .from('chats')
+            .update({
+              'status': ChatStatus.awaitingFollowUp.wireValue,
+              // The whole point — see DataService.reopenChat. Without this the
+              // merge stays skipped and everything said from here on is
+              // forgotten.
+              'memory_merged_at': null,
+            })
+            .eq('id', chatId)
+            .select()
+            .single();
+        return Chat.fromJson(row);
+      }, 'reopen that chat');
+
+  @override
   Future<void> deleteChat(String chatId) => _guard(
         () => _client.from('chats').delete().eq('id', chatId),
         'delete that chat',
@@ -311,6 +328,12 @@ class SupabaseDataService extends DataService {
             .single();
         return Message.fromJson(row);
       }, 'save that message');
+
+  @override
+  Future<void> deleteMessage(String messageId) => _guard(
+        () => _client.from('messages').delete().eq('id', messageId),
+        'remove that answer',
+      );
 
   // --- memory --------------------------------------------------------------
 

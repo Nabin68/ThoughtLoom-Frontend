@@ -299,12 +299,52 @@ void main() {
   });
 
   group('opening a chat', () {
-    testWidgets('a finished chat opens as a transcript', (tester) async {
+    testWidgets('a finished chat carries on rather than dead-ending',
+        (tester) async {
+      // The regression this pins. A completed chat — the status of every chat
+      // anyone ever finished properly — used to open read-only, so the advice
+      // landed, the user left, and the conversation could never be picked up
+      // again. That is backwards: a finished chat is the one most likely to be
+      // worth returning to, because life moved and the advice can now be tested
+      // against it.
       final userId = await signIn();
       await makeChat(userId, title: 'Lending Ravi money');
 
       await pumpHistory(tester, userId);
       await tester.tap(find.text('Lending Ravi money'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ContinuedChatScreen), findsOneWidget);
+      expect(find.byType(ChatTranscriptScreen), findsNothing);
+    });
+
+    testWidgets('the whole record is still one tap from the conversation',
+        (tester) async {
+      // Carrying on and reading back are two different jobs. The chat screen
+      // shows the advice onward; the transcript shows the scripted opening too.
+      final userId = await signIn();
+      await makeChat(userId, title: 'Lending Ravi money');
+
+      await pumpHistory(tester, userId);
+      await tester.tap(find.text('Lending Ravi money'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('The whole conversation'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ChatTranscriptScreen), findsOneWidget);
+    });
+
+    testWidgets('a chat that never reached advice opens read-only',
+        (tester) async {
+      // Nothing to continue: they walked away during the scripted opening. The
+      // intake cannot be safely resumed — its questions branch on a profile, and
+      // now on earlier answers, that may both have changed since.
+      final userId = await signIn();
+      await makeChat(userId, title: null, status: ChatStatus.inProgress);
+
+      await pumpHistory(tester, userId);
+      await tester.tap(find.text('Financial').first);
       await tester.pumpAndSettle();
 
       expect(find.byType(ChatTranscriptScreen), findsOneWidget);
@@ -332,6 +372,10 @@ void main() {
         (tester) async {
       // Titling runs after the user leaves, and the request that starts it can
       // simply not arrive. Without this, that chat is untitled forever.
+      //
+      // The retry moved when history stopped sending completed chats to the
+      // transcript screen — it lives on ContinuedChatScreen now. The guarantee
+      // is what matters and it is unchanged: opening the chat asks again.
       final userId = await signIn();
       await makeChat(userId, title: null);
 
@@ -535,7 +579,11 @@ void main() {
       // The whole arc, not just the advice — this is the "what did I say?" view.
       expect(find.text('How urgent is this?'), findsOneWidget);
       expect(find.text('Within a month'), findsOneWidget);
-      expect(find.text('What I said'), findsOneWidget);
+      // By semantics label: SectionLabel draws its label upper-case so an
+      // overline reads as a label rather than as a very small sentence, but
+      // announces the real words — and the casing is a styling choice this test
+      // has no business pinning.
+      expect(find.bySemanticsLabel('What I said'), findsOneWidget);
       expect(find.text('Say it on Sunday'), findsOneWidget);
       expect(find.textContaining('gift with resentment'), findsOneWidget);
     });

@@ -93,8 +93,10 @@ lib/
     recommendation_screen.dart    the answer
     continued_chat_screen.dart    the back-and-forth after it
     history_screen.dart     past chats, and search across them
-    chat_transcript_screen.dart   one past chat, read back
-  widgets/      shared UI in the existing theme
+    chat_transcript_screen.dart   one past chat, read back whole
+    profile_screen.dart     everything we know about you, editable
+    memory_screen.dart      what the app has concluded about you, verbatim
+  widgets/      the design system — buttons, cards, fields, the markdown renderer
 supabase/
   schema.sql    tables, triggers, and RLS policies
 ```
@@ -106,13 +108,18 @@ constructors instead.
 
 ## Onboarding
 
-A first registration lands on a one-time basic profile — twelve questions, one
+A first registration lands on a one-time basic profile — fourteen questions, one
 per screen, defined in `lib/data/onboarding_questions.dart`. Answers are written
 to `user_profiles` as the user goes, so a dropped connection costs one answer
-rather than all of them.
+rather than all of them. They are editable afterwards in `profile_screen.dart`.
 
-What a signed-in user sees is decided in one place, by
-`user_profiles.onboarding_completed`:
+What a signed-in user sees is decided in one place, by `AuthGate._needsOnboarding`
+— the completed flag *and* whether the question list has anything unanswered
+left in it. That second half is what lets a question be added later: a returning
+user is asked only the ones that did not exist when they signed up, because
+`firstUnansweredIndex` tests for a key's presence and a skip is stored as an
+explicit null. On the flag alone, a new question would reach new users and
+nobody else, forever.
 
 - **false** → the questions, resumed from the first unanswered one
 - **true** → straight to the dashboard, never asked again
@@ -177,9 +184,15 @@ scope every row to its owner, so routing the user's own chats through a service
 holding a key that *bypasses* those policies would add an authorisation problem
 in order to solve nothing.
 
-What a tap does follows from `status` — `awaiting_follow_up` means they closed
-the app on the advice and are mid-conversation, so it resumes; anything else is a
-record, and opens read-only.
+What a tap does follows from `status`, and the question it answers is "did this
+chat ever produce advice?" — `awaiting_follow_up` and `completed` both did, so
+both carry on the conversation (`ContinuedChatScreen` reopens a completed one
+properly, and links to the full transcript); `in_progress` never did, so there is
+nothing to continue and it opens read-only.
+
+It used to be `awaiting_follow_up` resumes and *anything else* opens read-only,
+which made `completed` — the status of every chat anyone ever finished properly —
+a dead end.
 
 The memory those chats build reaches the next one through the backend's context
 assembly, not through this app. **A first-time user is unaffected by all of it**
@@ -236,8 +249,13 @@ asked again.
 database rather than the UI — row count, `seq` order, message types — because
 that is the contract the adaptive questioning reads back.
 
-Note: `flutter test` falls back to a box-glyph font (Inter is not bundled), so
-text measures far wider than on a device. A tap whose offset misses only *warns*
-and then dispatches anyway, pressing whatever is really there — so always
-`ensureVisible` before tapping an option, and treat overflow reports under test
-with suspicion.
+`render_test.dart` is the layout pass: profile, memory, and a fully-marked-up
+recommendation at 360×780 and 320×568, scrolled to the bottom, asserting the
+render raised nothing.
+
+Note: Inter ships in the bundle now, but `flutter test` does not register a
+pubspec font without a `FontLoader`, so text under test is still measured in a
+fallback whose glyphs are wider than the real thing. That cuts one way — anything
+that fits under test fits on a device — but it also means a tap whose offset
+misses only *warns* and then dispatches anyway, pressing whatever is really
+there. Always `ensureVisible` before tapping an option.

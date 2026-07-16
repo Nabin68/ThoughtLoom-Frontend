@@ -16,6 +16,7 @@ import 'package:thoughtloom/screens/describe_problem_screen.dart';
 import 'package:thoughtloom/screens/history_screen.dart';
 import 'package:thoughtloom/screens/intake_flow_screen.dart';
 import 'package:thoughtloom/services/backend.dart';
+import 'package:thoughtloom/widgets/app_button.dart';
 
 /// Covers the dashboard and the per-category scripted opening: that picking a
 /// category opens a real chat row, that every question and answer lands in
@@ -90,21 +91,31 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Answers whatever question is on screen and advances. The last question's
-  /// button reads Continue rather than Next.
-  Future<void> answerCurrent(
+  /// Answers whatever question is on screen and advances, returning what it
+  /// answered. The last question's button reads Continue rather than Next.
+  ///
+  /// The answer comes back because the caller needs it: the question list is a
+  /// function of the answers so far, so walking the flow means feeding each one
+  /// back in to find out what is asked next.
+  Future<String> answerCurrent(
     WidgetTester tester,
     IntakeQuestion q, {
     bool isLast = false,
   }) async {
+    final String answer;
     if (q.kind == IntakeAnswerKind.text) {
-      await tester.enterText(find.byType(TextField).first, 'my answer');
+      answer = 'my answer';
+      await tester.enterText(find.byType(TextField).first, answer);
       await tester.pumpAndSettle();
     } else {
-      await choose(tester, q.options.first);
+      // One option, even on a multi-select: a single tick is a valid answer and
+      // is the shortest way through a flow this helper only exists to get past.
+      answer = q.options.first;
+      await choose(tester, answer);
     }
     await tester.tap(find.text(isLast ? 'Continue' : 'Next'));
     await tester.pumpAndSettle();
+    return answer;
   }
 
   /// Walks the whole scripted opening for [category] and returns its chat.
@@ -115,11 +126,25 @@ void main() {
   ) async {
     await tapCategory(tester, category);
     final profile = (await Backend.data.fetchProfile(userId))!;
-    final questions = questionsFor(category, profile);
 
-    for (var i = 0; i < questions.length; i++) {
-      await answerCurrent(tester, questions[i],
-          isLast: i == questions.length - 1);
+    // Rebuilt after every answer, exactly as the screen does it. A list computed
+    // once up front stops matching what is on screen the moment the
+    // relationship set learns who the chat is about — it rewords everything
+    // after `rel_who` around that person — and this helper would then tap for an
+    // option that is no longer offered.
+    final answers = <String, String?>{};
+    var questions = questionsFor(category, profile, answers);
+    var i = 0;
+    while (i < questions.length) {
+      final question = questions[i];
+      final answer = await answerCurrent(
+        tester,
+        question,
+        isLast: i == questions.length - 1,
+      );
+      answers[question.id] = answer;
+      questions = questionsFor(category, profile, answers);
+      i++;
     }
     return (await Backend.data.fetchChats(userId)).single;
   }
@@ -133,7 +158,10 @@ void main() {
       for (final category in ChatCategory.values) {
         expect(find.text(category.label), findsOneWidget);
       }
-      expect(find.text('Past'), findsOneWidget);
+      // The way into history is a labelled icon in the header now rather than
+      // a "Past" pill competing with the four topics for the eye.
+      expect(find.byTooltip('Your past chats'), findsOneWidget);
+      expect(find.byTooltip('Profile and sign out'), findsOneWidget);
       expect(find.text('Hello, Ada'), findsOneWidget);
     });
 
@@ -154,7 +182,7 @@ void main() {
     testWidgets('the history button opens history', (tester) async {
       await signInWithProfile(tester);
 
-      await tester.tap(find.text('Past'));
+      await tester.tap(find.byTooltip('Your past chats'));
       await tester.pumpAndSettle();
 
       expect(find.byType(HistoryScreen), findsOneWidget);
@@ -168,11 +196,11 @@ void main() {
 
       // Back out of the flow without answering anything. Abandoning must not
       // lose the chat — it is the user's, and Prompt 6 resumes it.
-      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
       await tester.pumpAndSettle();
       expect(find.byType(DashboardScreen), findsOneWidget);
 
-      await tester.tap(find.text('Past'));
+      await tester.tap(find.byTooltip('Your past chats'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Unfinished'), findsOneWidget);
@@ -189,7 +217,7 @@ void main() {
       final first = questions.first;
 
       await answerCurrent(tester, first);
-      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
       await tester.pumpAndSettle();
 
       // The earlier answer is still selected, not lost.
@@ -256,17 +284,112 @@ void main() {
       expect(message.metadata['options'], first.options);
     });
 
+    testWidgets('a multi-select question keeps every answer, not the last tap',
+        (tester) async {
+      final userId = await signInWithProfile(
+        tester,
+        answers: const {
+          'gender': 'Man',
+          'relationship_status': 'In a long-term relationship',
+        },
+      );
+      await tapCategory(tester, ChatCategory.relationship);
+
+      // Question one names the person, which is what the rest are worded around.
+      await choose(tester, 'My girlfriend');
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      // Question two is the one that was never one thing.
+      await choose(tester, 'I do not feel valued');
+      await choose(tester, "She doesn't give me time");
+      await choose(tester, 'We fight about the same thing every time');
+
+      // Ticking is a toggle, so a mis-tap is undoable rather than final.
+      await choose(tester, 'We fight about the same thing every time');
+
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      final chat = (await Backend.data.fetchChats(userId)).single;
+      final answer = (await Backend.data.fetchMessages(chat.id))
+          .firstWhere((m) => m.metadata['question_id'] == 'rel_whats_wrong');
+
+      // Joined in *option* order rather than tap order, so two people who ticked
+      // the same things produce the same string — the transcript is read by a
+      // model, and "A; C" versus "C; A" being different answers to one question
+      // is noise it does not need.
+      expect(
+        answer.answerText,
+        "She doesn't give me time${selectionSeparator}I do not feel valued",
+      );
+      expect(answer.metadata['multi'], isTrue);
+      expect(answer.metadata['selected'], [
+        "She doesn't give me time",
+        'I do not feel valued',
+      ]);
+    });
+
+    testWidgets('changing who the chat is about drops the answers about '
+        'someone else', (tester) async {
+      // The relationship set words everything after the first question around
+      // the person it named. Going back and naming a different person does not
+      // just re-word what is ahead — it invalidates rows already written, which
+      // are answers to questions that were never asked of this chat. The model
+      // reads the transcript as a record of what this person said, so a stale
+      // row is wrong rather than merely untidy.
+      final userId = await signInWithProfile(
+        tester,
+        answers: const {
+          'gender': 'Man',
+          'relationship_status': 'In a long-term relationship',
+        },
+      );
+      await tapCategory(tester, ChatCategory.relationship);
+
+      await choose(tester, 'My girlfriend');
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      await choose(tester, "She doesn't give me time");
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      final chat = (await Backend.data.fetchChats(userId)).single;
+      expect(
+        (await Backend.data.fetchMessages(chat.id)),
+        hasLength(2),
+        reason: 'rel_who and rel_whats_wrong are both written by now',
+      );
+
+      // Back to the first question, and it is about someone else entirely.
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+      await tester.pumpAndSettle();
+      await choose(tester, 'My parents or family');
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      final after = await Backend.data.fetchMessages(chat.id);
+      expect(after, hasLength(1), reason: 'the girlfriend answer is gone');
+      expect(after.single.metadata['question_id'], 'rel_who');
+      expect(after.single.answerText, 'My parents or family');
+
+      // And the question now on screen is about them, not her.
+      expect(
+        find.text('What is actually going on with your family?'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('Next is disabled until the question is answered',
         (tester) async {
       await signInWithProfile(tester);
       await tapCategory(tester, ChatCategory.education);
 
-      final button = tester.widget<ElevatedButton>(
-        find.ancestor(
-          of: find.text('Next'),
-          matching: find.byType(ElevatedButton),
-        ),
-      );
+      final button =
+          tester.widget<AppButton>(find.widgetWithText(AppButton, 'Next'));
       expect(button.onPressed, isNull);
     });
   });
@@ -325,12 +448,8 @@ void main() {
       final userId = await signInWithProfile(tester);
       await completeIntake(tester, userId, ChatCategory.other);
 
-      ElevatedButton button() => tester.widget<ElevatedButton>(
-            find.ancestor(
-              of: find.text('Continue'),
-              matching: find.byType(ElevatedButton),
-            ),
-          );
+      AppButton button() =>
+          tester.widget<AppButton>(find.widgetWithText(AppButton, 'Continue'));
       expect(button().onPressed, isNull);
 
       await tester.enterText(find.byType(TextField).first, '   ');
@@ -456,27 +575,121 @@ void main() {
       expect(options.first, 'My parents or family');
     });
 
-    test('relationship wording follows the status, and never re-asks it', () {
-      List<String> whoOptions(String? status) => questionsFor(
+    test('who a relationship chat is about is offered in the user\'s own terms',
+        () {
+      List<String> whoOptions({String? status, String? gender}) => questionsFor(
             ChatCategory.relationship,
-            profileWith({if (status != null) 'relationship_status': status}),
+            profileWith({
+              if (status != null) 'relationship_status': status,
+              if (gender != null) 'gender': gender,
+            }),
           ).firstWhere((q) => q.id == 'rel_who').options;
 
-      expect(whoOptions('Married').first, 'My partner');
-      expect(whoOptions('Seeing someone').first, 'Someone I am seeing');
-      expect(whoOptions('Separated or divorced').first, 'My ex');
-
-      // Declined in onboarding: neutral wording, and no second attempt at
-      // asking what they chose not to say.
-      expect(whoOptions(null).first, 'My partner, or someone I am seeing');
-      final questions = questionsFor(
-        ChatCategory.relationship,
-        profileWith(const {}),
+      // The entire reason gender is asked. "Who is this about? Someone I am
+      // close to" is a question nobody has ever asked themselves.
+      expect(
+        whoOptions(status: 'In a long-term relationship', gender: 'Man').first,
+        'My girlfriend',
       );
       expect(
-        questions.any((q) => q.text.toLowerCase().contains('are you in a relationship')),
-        isFalse,
+        whoOptions(status: 'In a long-term relationship', gender: 'Woman').first,
+        'My boyfriend',
       );
+      expect(whoOptions(status: 'Married', gender: 'Man').first, 'My wife');
+      expect(whoOptions(status: 'Married', gender: 'Woman').first, 'My husband');
+
+      // Offered first, never assumed: the alternative is on the same screen and
+      // one tap away, so nobody is told what their relationship is.
+      expect(
+        whoOptions(status: 'In a long-term relationship', gender: 'Man'),
+        contains('My boyfriend'),
+      );
+
+      // Declined, or a profile written before the question existed. Neutral
+      // wording, and no second attempt at asking what they chose not to say.
+      expect(
+        whoOptions(
+          status: 'In a long-term relationship',
+          gender: 'Prefer not to say',
+        ).first,
+        'My partner',
+      );
+      expect(whoOptions(status: 'In a long-term relationship').first,
+          'My partner');
+      expect(whoOptions(status: 'Separated or divorced', gender: 'Man').first,
+          'My ex-girlfriend');
+      expect(whoOptions(status: 'Separated or divorced').first, 'My ex');
+
+      // Neither onboarding question is ever asked again.
+      final questions =
+          questionsFor(ChatCategory.relationship, profileWith(const {}));
+      final texts = questions.map((q) => q.text.toLowerCase());
+      expect(texts.any((t) => t.contains('are you in a relationship')), isFalse);
+      expect(texts.any((t) => t.contains('how do you describe yourself')),
+          isFalse);
+    });
+
+    test('the questions after the first are about the person it named', () {
+      List<IntakeQuestion> about(String who) => questionsFor(
+            ChatCategory.relationship,
+            profileWith(const {
+              'gender': 'Man',
+              'relationship_status': 'In a long-term relationship',
+            }),
+            {'rel_who': who},
+          );
+
+      IntakeQuestion find(List<IntakeQuestion> qs, String id) =>
+          qs.firstWhere((q) => q.id == id);
+
+      final her = about('My girlfriend');
+      expect(find(her, 'rel_whats_wrong').text,
+          'What is actually going on with your girlfriend?');
+      expect(find(her, 'rel_whats_wrong').options,
+          contains("She doesn't give me time"));
+      expect(find(her, 'rel_spoken').text, 'Have you told her?');
+
+      // The pronoun follows the tap, not the gender of the person asking. A man
+      // who picked "My boyfriend" is not then asked about "her" — which is the
+      // whole reason the first answer, and not an inference, decides this.
+      final him = about('My boyfriend');
+      expect(find(him, 'rel_spoken').text, 'Have you told him?');
+      expect(find(him, 'rel_whats_wrong').options,
+          contains("He doesn't give me time"));
+
+      // Singular they takes the plural verb, which is the tell that a string was
+      // assembled by a machine when it gets it wrong.
+      final family = about('My parents or family');
+      expect(find(family, 'rel_spoken').text, 'Have you told them?');
+      expect(find(family, 'rel_spoken').options, contains('They have no idea'));
+      expect(find(family, 'rel_whats_wrong').options,
+          contains("They don't listen to me"));
+
+      // A family chat is not asked the questions that only make sense of a
+      // partner.
+      expect(find(family, 'rel_fear').options,
+          isNot(contains('I do not want to be alone')));
+      expect(find(her, 'rel_fear').options,
+          contains('I do not want to be alone'));
+    });
+
+    test('the honest answer to several of these is more than one thing', () {
+      // The complaint this exists for: every one of these was a single-select,
+      // so someone who was tired *and* unheard *and* frightened of saying so had
+      // to pick one and the app advised on the fragment that survived.
+      final multi = <ChatCategory, String>{
+        ChatCategory.relationship: 'rel_whats_wrong',
+        ChatCategory.education: 'edu_obstacle',
+        ChatCategory.financial: 'fin_blocker',
+        ChatCategory.other: 'oth_blocker',
+      };
+
+      multi.forEach((category, id) {
+        final question = questionsFor(category, profileWith(const {}))
+            .firstWhere((q) => q.id == id);
+        expect(question.isMulti, isTrue, reason: '$id should take several');
+        expect(question.kind, IntakeAnswerKind.multiChoice);
+      });
     });
   });
 

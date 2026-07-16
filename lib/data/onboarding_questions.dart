@@ -58,6 +58,30 @@ const List<OnboardingQuestion> onboardingQuestions = [
     column: ProfileColumn.ageRange,
   ),
 
+  // Added after launch, so returning users are asked this one and nothing else
+  // — see `firstUnansweredIndex` and the gate in `AuthGate`.
+  //
+  // It earns a screen because without it the app cannot write a relationship
+  // question in the terms the user actually thinks in. "Who is this about?
+  // Someone I am close to" is a question nobody has ever asked themselves; "Is
+  // this about your girlfriend?" is the conversation they came to have. Getting
+  // there needs to know who is asking.
+  //
+  // "Prefer not to say" is a real option and not a punishment: it degrades to
+  // the neutral wording the app used before this question existed, which is
+  // merely worse, not broken.
+  OnboardingQuestion(
+    id: 'gender',
+    text: 'How do you describe yourself?',
+    helper: 'Only so the questions we ask sound like your life, not a form.',
+    options: [
+      'Man',
+      'Woman',
+      'Non-binary',
+      'Prefer not to say',
+    ],
+  ),
+
   OnboardingQuestion(
     id: 'education_level',
     text: 'How far have you got in your education?',
@@ -199,6 +223,30 @@ const List<OnboardingQuestion> onboardingQuestions = [
     ],
   ),
 
+  // One free-text box rather than four fields for father, mother, siblings, and
+  // their occupations.
+  //
+  // A form would collect the same facts and cost four more screens before the
+  // user has any reason to trust the app — and it would still miss the ones that
+  // matter, which are never "father: engineer" but "dad's shop is why I can't
+  // leave Pune". People give that in a sentence and would not give it to a
+  // field labelled Father's Occupation.
+  //
+  // Skippable, and the profile screen lets it be filled in later — by then the
+  // app has earned something. Anything the model picks up in a chat lands in
+  // memory rather than here; this is only what the user chose to tell us.
+  OnboardingQuestion(
+    id: 'family_context',
+    text: 'Who is at home, and what do they do?',
+    helper: 'Parents, siblings, anyone whose opinion counts. Skip if you would '
+        'rather not.',
+    kind: OnboardingAnswerKind.text,
+    hint: 'e.g. Dad runs a shop, Mum teaches, one younger sister in school',
+    icon: Icons.people_outline,
+    maxLines: 4,
+    optional: true,
+  ),
+
   // The catch-all. Everything above is a box; this is where the thing that
   // does not fit in one goes — a visa, an illness, a family business waiting.
   OnboardingQuestion(
@@ -275,6 +323,23 @@ EducationStage educationStageOf(UserProfile profile) =>
       'Diploma or vocational training' => EducationStage.vocational,
       'Mostly self-taught' => EducationStage.selfTaught,
       _ => EducationStage.unknown,
+    };
+
+/// How the user describes themselves.
+///
+/// Used for one thing: ordering and wording the options in the relationship
+/// intake, so a man weighing something with his girlfriend is offered exactly
+/// that rather than "someone I am close to". [unspecified] covers both "Prefer
+/// not to say" and a profile written before the question existed, and every
+/// caller must degrade to neutral wording for it rather than guessing.
+enum Gender { man, woman, nonBinary, unspecified }
+
+Gender genderOf(UserProfile profile) =>
+    switch (onboardingAnswer(profile, 'gender')) {
+      'Man' => Gender.man,
+      'Woman' => Gender.woman,
+      'Non-binary' => Gender.nonBinary,
+      _ => Gender.unspecified,
     };
 
 /// Whether there is a partner in the picture.

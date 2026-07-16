@@ -19,6 +19,13 @@ class FakeAi implements AiService {
   final List<AiFailure> failures = [];
 
   final List<Map<String, String?>> answersSent = [];
+
+  /// The [selections] each answer was sent with, in the same order as
+  /// [answersSent]. Null for a single-select or free-text answer, which is what
+  /// the real client sends — the joined `text` is the whole answer, and
+  /// selections only exist to keep a multi-select one structured.
+  final List<List<String>?> selectionsSent = [];
+
   int followUpCalls = 0;
 
   /// Chats this was asked to close. The screens fire this without awaiting it,
@@ -38,9 +45,11 @@ class FakeAi implements AiService {
     required String chatId,
     String? answerToMessageId,
     String? answer,
+    List<String>? selections,
   }) async {
     if (answer != null) {
       answersSent.add({'id': answerToMessageId, 'text': answer});
+      selectionsSent.add(selections);
     }
     _maybeFail();
     if (_turn >= turns.length) {

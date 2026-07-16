@@ -9,6 +9,7 @@ import 'package:thoughtloom/models/user_profile.dart';
 import 'package:thoughtloom/screens/dashboard_screen.dart';
 import 'package:thoughtloom/screens/onboarding_screen.dart';
 import 'package:thoughtloom/services/backend.dart';
+import 'package:thoughtloom/widgets/app_button.dart';
 
 /// Covers the one-time basic profile: that answers land in the database as the
 /// user goes rather than at the end, that an interrupted run resumes, and that
@@ -42,7 +43,7 @@ void main() {
   Future<String> register(WidgetTester tester) async {
     await pumpApp(tester);
     await tester.pumpAndSettle(const Duration(seconds: 1));
-    await tester.tap(find.text('Start Thinking Clearly'));
+    await tester.tap(find.text('Create an account'));
     await tester.pumpAndSettle();
 
     // Fields in order: name, email, password, confirm.
@@ -51,7 +52,7 @@ void main() {
     await tester.enterText(find.byType(TextFormField).at(2), 'hunter2');
     await tester.enterText(find.byType(TextFormField).at(3), 'hunter2');
 
-    final button = find.text('Create Account');
+    final button = find.text('Create account');
     await tester.ensureVisible(button);
     await tester.pumpAndSettle();
     await tester.tap(button);
@@ -121,12 +122,12 @@ void main() {
       (tester) async {
     await register(tester);
 
-    ElevatedButton button() => tester.widget<ElevatedButton>(
-          find.ancestor(
-            of: find.text('Continue'),
-            matching: find.byType(ElevatedButton),
-          ),
-        );
+    // Reads the AppButton rather than an ElevatedButton underneath it: the
+    // button is a Material + InkWell now, because a themed ElevatedButton could
+    // not give the primary action its sage glow without fighting the framework
+    // for every other state.
+    AppButton button() =>
+        tester.widget<AppButton>(find.widgetWithText(AppButton, 'Continue'));
 
     expect(button().onPressed, isNull);
 
@@ -162,7 +163,7 @@ void main() {
 
     await typeAnswer(tester, 'Pune, India');
     await tapContinue(tester);
-    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
     await tester.pumpAndSettle();
 
     expect(find.text(onboardingQuestions.first.text), findsOneWidget);
@@ -323,6 +324,26 @@ void main() {
         educationStageOf(answering('education_level', null)),
         EducationStage.unknown,
       );
+    });
+
+    test('every gender option maps to something, including the refusal', () {
+      for (final option in optionsOf('gender')) {
+        final gender = genderOf(answering('gender', option));
+        if (option == 'Prefer not to say') {
+          // Declining is a real answer with a real consequence — the neutral
+          // wording — and not a classifier failure. It shares [unspecified] with
+          // "never asked" because both mean the same thing to every caller: do
+          // not guess.
+          expect(gender, Gender.unspecified);
+        } else {
+          expect(
+            gender,
+            isNot(Gender.unspecified),
+            reason: '"$option" no longer maps to a gender',
+          );
+        }
+      }
+      expect(genderOf(answering('gender', null)), Gender.unspecified);
     });
 
     test('every relationship_status option maps to a partner status', () {

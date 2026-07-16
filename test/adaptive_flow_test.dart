@@ -12,6 +12,7 @@ import 'package:thoughtloom/screens/recommendation_screen.dart';
 import 'package:thoughtloom/services/ai_service.dart';
 import 'package:thoughtloom/services/backend.dart';
 import 'package:thoughtloom/theme/app_theme.dart';
+import 'package:thoughtloom/widgets/app_button.dart';
 
 import 'fake_ai.dart';
 
@@ -200,12 +201,12 @@ void main() {
 
       await pumpAdaptive(tester);
 
-      ElevatedButton button() => tester.widget<ElevatedButton>(
-            find.ancestor(
-              of: find.text('Continue'),
-              matching: find.byType(ElevatedButton),
-            ),
-          );
+      // The AppButton itself, not an ElevatedButton underneath it: the button
+      // is a Material + InkWell now, because a themed ElevatedButton could not
+      // give the primary action its sage glow without fighting the framework
+      // for every other state.
+      AppButton button() =>
+          tester.widget<AppButton>(find.widgetWithText(AppButton, 'Continue'));
       expect(button().onPressed, isNull);
 
       await tester.tap(find.text('A'));
@@ -323,7 +324,10 @@ void main() {
     testWidgets('sources are shown only when it actually looked something up',
         (tester) async {
       await pumpRecommendation(tester);
-      expect(find.text('What I looked up'), findsNothing);
+      // By semantics label, not by text: SectionLabel draws its label
+      // upper-case for hierarchy but announces the real sentence, and the
+      // casing is a styling choice this test has no business pinning.
+      expect(find.bySemanticsLabel('What I looked up'), findsNothing);
 
       ai.recommendation_ = const Recommendation(
         text: 'Go.',
@@ -332,8 +336,8 @@ void main() {
       Backend.overrideWith(ai: ai, usingSupabase: true);
       await pumpRecommendation(tester);
 
-      expect(find.text('What I looked up'), findsOneWidget);
-      expect(find.text('· Fees 2026'), findsOneWidget);
+      expect(find.bySemanticsLabel('What I looked up'), findsOneWidget);
+      expect(find.text('Fees 2026'), findsOneWidget);
     });
 
     testWidgets('a failure offers a retry', (tester) async {
@@ -366,13 +370,19 @@ void main() {
       );
     });
 
-    testWidgets('keep chatting opens the conversation', (tester) async {
+    testWidgets('pushing back opens the conversation, replacing this screen',
+        (tester) async {
       await pumpRecommendation(tester);
 
-      await tester.tap(find.text('Keep chatting'));
+      await tester.tap(find.text('Push back on this'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ContinuedChatScreen), findsOneWidget);
+      // pushReplacement, so leaving the chat goes home rather than revealing a
+      // second, frozen copy of the advice with its own "leave" button — and it
+      // is what lets ContinuedChatScreen simply pop when it is reached from
+      // history instead.
+      expect(find.byType(RecommendationScreen), findsNothing);
     });
   });
 
@@ -415,7 +425,7 @@ void main() {
 
       await tester.enterText(find.byType(TextField), 'But I cannot afford it.');
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.arrow_upward));
+      await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
       await tester.pumpAndSettle();
 
       expect(find.text('But I cannot afford it.'), findsOneWidget);
@@ -429,7 +439,7 @@ void main() {
 
       await tester.enterText(find.byType(TextField), 'But I cannot afford it.');
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.arrow_upward));
+      await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
       await tester.pumpAndSettle();
 
       expect(find.text('Server had a moment.'), findsOneWidget);
@@ -445,7 +455,7 @@ void main() {
     testWidgets('leaving completes the chat', (tester) async {
       await pumpChat(tester);
 
-      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
       await tester.pumpAndSettle();
 
       expect(

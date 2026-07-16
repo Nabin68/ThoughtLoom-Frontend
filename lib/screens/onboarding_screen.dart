@@ -10,10 +10,11 @@ import '../services/data_service.dart';
 import '../services/session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
-import '../widgets/auth_text_field.dart';
+import '../widgets/app_header.dart';
+import '../widgets/app_button.dart';
+import '../widgets/app_text_field.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/option_tile.dart';
-import '../widgets/primary_button.dart';
 
 /// The one-time basic profile, one question per screen.
 ///
@@ -58,6 +59,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _saving = false;
   String? _error;
 
+  /// Where this run started.
+  ///
+  /// Almost always 0. It is not for a returning user who already finished
+  /// onboarding and is being asked only the questions added since — see
+  /// `AuthGate._needsOnboarding`. Counting "Step 13 of 14" at someone who
+  /// believes they did this months ago is a lie about how long it will take, and
+  /// they will put the phone down. The counter is relative to what is actually
+  /// left, and [_toppingUp] changes the words around it.
+  int _startIndex = 0;
+
+  /// Whether this is a returning user being asked a couple of new questions
+  /// rather than a new user being onboarded.
+  bool _toppingUp = false;
+
   /// The current question's pending radio selection. Text answers live in
   /// [_textController] instead.
   String? _choice;
@@ -90,6 +105,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // upsert, but cheaper to absorb than to leave as a crash.
     _index = firstUnansweredIndex(_answers)
         .clamp(0, onboardingQuestions.length - 1);
+    // The flag says they have been through this before; the index says there is
+    // still something to ask. Both together is the top-up case.
+    _toppingUp = _profile.onboardingCompleted && _index > 0;
+    // Only a top-up gets a relative counter. Someone who abandoned onboarding
+    // halfway and came back is still doing all fourteen, and telling them
+    // "Step 1 of 12" would restart the count they were already partway through.
+    _startIndex = _toppingUp ? _index : 0;
     _loadPending();
   }
 
@@ -120,7 +142,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _back() {
-    if (_index == 0 || _saving) return;
+    // Never back past where this run began: for a top-up the questions before
+    // [_startIndex] were answered in another session, and walking into them here
+    // would look like the app had decided to re-onboard them after all.
+    if (_index <= _startIndex || _saving) return;
     setState(() {
       _error = null;
       _index--;
@@ -229,94 +254,95 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final horizontalPadding = screenWidth * 0.06;
+    final remaining = onboardingQuestions.length - _startIndex;
+    final step = _index - _startIndex + 1;
 
     return AppBackground(
       child: Column(
         children: [
-          _Header(
-            step: _index + 1,
-            total: onboardingQuestions.length,
-            onBack: _index > 0 ? _back : null,
-            padding: horizontalPadding,
+          AppHeader(
+            title: _toppingUp ? 'One or two new things' : 'Getting to know you',
+            subtitle: 'Step $step of $remaining',
+            onBack: _index > _startIndex ? _back : null,
+          ),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: AppTheme.s5),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: step / remaining),
+                duration: const Duration(milliseconds: 320),
+                curve: Curves.easeOut,
+                builder: (context, value, _) => LinearProgressIndicator(
+                  value: value,
+                  minHeight: 4,
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.14),
+                  valueColor:
+                      const AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                ),
+              ),
+            ),
           ),
           Expanded(
             child: SingleChildScrollView(
               controller: _scrollController,
               physics: const BouncingScrollPhysics(),
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(height: screenHeight * 0.02),
-                    Text(
-                      _question.text,
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.065,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textDark,
-                        height: 1.3,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    if (_question.helper != null) ...[
-                      SizedBox(height: screenHeight * 0.012),
-                      Text(
-                        _question.helper!,
-                        style: TextStyle(
-                          fontSize: screenWidth * 0.038,
-                          color: AppTheme.textLight,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                    SizedBox(height: screenHeight * 0.035),
-                    if (_question.kind == OnboardingAnswerKind.text)
-                      _buildTextInput()
-                    else
-                      ..._buildOptions(),
-                    SizedBox(height: screenHeight * 0.03),
+              padding: EdgeInsets.fromLTRB(
+                AppTheme.s5,
+                AppTheme.s5,
+                AppTheme.s5,
+                AppTheme.s6,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Only for a returning user, and only on the first of their new
+                  // questions: they finished this months ago and are entitled to
+                  // know why they are looking at it again.
+                  if (_toppingUp && _index == _startIndex) ...[
+                    _NewQuestionsNote(),
+                    SizedBox(height: AppTheme.s5),
                   ],
-                ),
+                  Text(_question.text, style: AppTheme.title(context)),
+                  if (_question.helper != null) ...[
+                    SizedBox(height: AppTheme.s2),
+                    Text(_question.helper!, style: AppTheme.secondary(context)),
+                  ],
+                  SizedBox(height: AppTheme.s5),
+                  if (_question.kind == OnboardingAnswerKind.text)
+                    _buildTextInput()
+                  else
+                    ..._buildOptions(),
+                ],
               ),
             ),
           ),
           Padding(
             padding: EdgeInsets.fromLTRB(
-              horizontalPadding,
+              AppTheme.s5,
               0,
-              horizontalPadding,
-              screenHeight * 0.02,
+              AppTheme.s5,
+              AppTheme.s4,
             ),
             child: Column(
               children: [
                 if (_error != null) ...[
                   ErrorBanner(message: _error!),
-                  SizedBox(height: screenHeight * 0.015),
+                  SizedBox(height: AppTheme.s3),
                 ],
-                PrimaryButton(
+                AppButton(
                   label: _isLast ? 'Finish' : 'Continue',
-                  icon: Icons.arrow_forward,
+                  icon: Icons.arrow_forward_rounded,
                   busy: _saving,
                   // Null disables it: the client-side validation is simply that
                   // an unanswered required question has no way forward.
                   onPressed: _answered ? _submit : null,
                 ),
                 if (_question.optional) ...[
-                  SizedBox(height: screenHeight * 0.008),
-                  TextButton(
+                  SizedBox(height: AppTheme.s2),
+                  AppButton.quiet(
+                    label: 'Skip this one',
                     onPressed: _saving ? null : () => _submit(skip: true),
-                    child: Text(
-                      'Skip this one',
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.038,
-                        color: AppTheme.textLight,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
                   ),
                 ],
               ],
@@ -332,14 +358,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           OptionTile(
             label: option,
             selected: _choice == option,
-            // Selecting does not advance. An accidental tap on a mis-read
-            // option would otherwise be committed to the database before the
-            // user finished reading it.
-            onTap: _saving ? () {} : () => setState(() => _choice = option),
+            enabled: !_saving,
+            // Selecting does not advance. An accidental tap on a mis-read option
+            // would otherwise be committed to the database before the user
+            // finished reading it.
+            onTap: () => setState(() => _choice = option),
           ),
       ];
 
-  Widget _buildTextInput() => AuthTextField(
+  Widget _buildTextInput() => AppTextField(
         controller: _textController,
         hintText: _question.hint ?? '',
         icon: _question.icon ?? Icons.short_text,
@@ -357,54 +384,35 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       );
 }
 
-/// Step counter and back arrow, in the type the flow screens already use.
-class _Header extends StatelessWidget {
-  final int step;
-  final int total;
-  final VoidCallback? onBack;
-  final double padding;
-
-  const _Header({
-    required this.step,
-    required this.total,
-    required this.onBack,
-    required this.padding,
-  });
-
+/// Why a returning user is seeing this screen again.
+class _NewQuestionsNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: padding,
-        vertical: screenHeight * 0.02,
+    return Container(
+      padding: EdgeInsets.all(AppTheme.s4),
+      decoration: BoxDecoration(
+        color: AppTheme.accentSoft,
+        borderRadius: BorderRadius.circular(AppTheme.rSm),
+        border: const Border(
+          left: BorderSide(color: AppTheme.accentDeep, width: 3),
+        ),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Holds its width when there is nowhere to go back to, so the step
-          // counter does not jump left between the first and second question.
-          SizedBox(
-            width: screenWidth * 0.08,
-            child: onBack == null
-                ? null
-                : GestureDetector(
-                    onTap: onBack,
-                    behavior: HitTestBehavior.opaque,
-                    child: Icon(
-                      Icons.arrow_back,
-                      size: screenWidth * 0.055,
-                      color: AppTheme.textLight,
-                    ),
-                  ),
+          const Icon(
+            Icons.waving_hand_outlined,
+            size: 17,
+            color: AppTheme.accentDeep,
           ),
-          Text(
-            'Step $step of $total',
-            style: TextStyle(
-              fontSize: screenWidth * 0.038,
-              color: AppTheme.textLight,
-              fontWeight: FontWeight.w500,
+          SizedBox(width: AppTheme.s3),
+          Expanded(
+            child: Text(
+              'ThoughtLoom has learned to ask better questions since you signed '
+              'up, and it needs a couple of things it never asked for. Nothing '
+              'you already answered is being asked again.',
+              style: AppTheme.secondary(context)
+                  .copyWith(color: AppTheme.textOnCard),
             ),
           ),
         ],

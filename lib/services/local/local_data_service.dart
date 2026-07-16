@@ -156,6 +156,25 @@ class LocalDataService extends DataService {
   }
 
   @override
+  Future<Chat> reopenChat(String chatId) async {
+    final existing = await fetchChat(chatId);
+    if (existing == null) throw const DataFailure('That chat no longer exists.');
+
+    final rows = _store.readTable(LocalStore.chatsKey);
+    final row = Map<String, dynamic>.from(rows[chatId] as Map);
+    row['status'] = ChatStatus.awaitingFollowUp.wireValue;
+    // Mirrors the Supabase write rather than the Chat model, which does not
+    // carry this field — the merge flag is the database's, and only reopenChat
+    // ever touches it.
+    row['memory_merged_at'] = null;
+    row['updated_at'] = DateTime.now().toUtc().toIso8601String();
+    rows[chatId] = row;
+    await _store.writeTable(LocalStore.chatsKey, rows);
+
+    return Chat.fromJson(row);
+  }
+
+  @override
   Future<void> deleteChat(String chatId) async {
     final chats = _store.readTable(LocalStore.chatsKey)..remove(chatId);
     await _store.writeTable(LocalStore.chatsKey, chats);
@@ -262,6 +281,17 @@ class LocalDataService extends DataService {
     }
     await _writeMessage(message);
     return message;
+  }
+
+  @override
+  Future<void> deleteMessage(String messageId) async {
+    final table = _store.readTable(LocalStore.messagesKey);
+    // Deleting something already gone is not an error on either backend: the
+    // Supabase path is a `delete().eq(...)` that matches no rows and succeeds,
+    // and the flow calls this to clean up a tail it may have cleaned up
+    // already. Both must agree, so this is silent too.
+    if (table.remove(messageId) == null) return;
+    await _store.writeTable(LocalStore.messagesKey, table);
   }
 
   // --- memory --------------------------------------------------------------

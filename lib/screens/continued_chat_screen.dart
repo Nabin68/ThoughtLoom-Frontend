@@ -9,18 +9,36 @@ import '../services/backend.dart';
 import '../services/chat_completion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
+import '../widgets/app_header.dart';
 import '../widgets/dictation.dart';
 import '../widgets/error_banner.dart';
+import '../widgets/rich_body.dart';
+import 'chat_transcript_screen.dart';
 
-/// The back-and-forth after the recommendation.
+/// The conversation after the recommendation — including one picked back up
+/// weeks later.
 ///
-/// Loads the chat's real history so the recommendation is the first thing on
-/// screen — this is a continuation, not a fresh window. Only the turns worth
-/// re-reading are shown: the scripted Q&A is scaffolding the user already
-/// walked through, and replaying twelve of them above the answer would bury it.
+/// ### Reopening a finished chat
 ///
-/// Both sides of each turn are written by the API, so nothing here writes a
-/// message. Leaving completes the chat.
+/// History used to send anything that was not `awaiting_follow_up` to a
+/// read-only transcript, which meant a *completed* chat — every chat anybody
+/// ever finished properly — was a dead end. You could read what you were told
+/// and had no way to say "that didn't work" or "something changed". The
+/// conversation ended the moment it became useful to keep having.
+///
+/// Now any chat that got as far as advice opens here, whatever its status, and
+/// [_reopenIfNeeded] puts a completed one back into the conversation before the
+/// first new message lands. A chat that never reached advice still opens
+/// read-only — there is nothing to continue, and the scripted intake cannot be
+/// resumed safely (its questions branch on a profile, and now on answers, that
+/// may both have changed since).
+///
+/// ### What is shown
+///
+/// The recommendation onward: the conversation the user is actually having. The
+/// intake is how we got here, not part of it, and replaying twelve scripted
+/// questions above the answer would bury it — the transcript screen exists for
+/// anyone who wants the whole thing, and the header links to it.
 class ContinuedChatScreen extends StatefulWidget {
   final Chat chat;
 
@@ -38,6 +56,10 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
 
   final List<_Bubble> _bubbles = [];
 
+  /// Tracked rather than read from the widget: reopening a completed chat
+  /// changes its status, and leaving has to write the right one back.
+  late Chat _chat = widget.chat;
+
   bool _loading = true;
   bool _sending = false;
   String? _error;
@@ -49,7 +71,32 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
   void initState() {
     super.initState();
     _dictation.init();
+    _backfill();
     _loadHistory();
+  }
+
+  /// Asks the API to finish closing this chat, if it never got that far.
+  ///
+  /// This used to live only in [ChatTranscriptScreen], which was where history
+  /// sent a completed chat. It sends them here now, so the guarantee has to come
+  /// too — otherwise the one path that recovers a chat whose titling never
+  /// landed would have quietly disappeared along with the dead end it lived in.
+  ///
+  /// Titling and the memory merge run in a background task after the user leaves
+  /// a chat, and the request that starts them can simply not arrive: the app was
+  /// killed, the network was down, Render was cold. Opening the chat is the
+  /// natural retry, and the API skips whichever half already ran.
+  ///
+  /// The status guard is what makes this safe to call on a screen the user is
+  /// about to talk in: [completeChat] writes `completed`, which would be a lie
+  /// about a chat sitting at `awaiting_follow_up` — but it skips that write when
+  /// the chat is *already* completed, which is the only case this fires in.
+  void _backfill() {
+    if (_chat.title != null || _chat.status != ChatStatus.completed) return;
+    // Not awaited: the title lands on the next visit to history, and blocking a
+    // conversation the user asked to reopen on a model call would be a strange
+    // thing to do to them.
+    completeChat(_chat);
   }
 
   void _onDictationChanged() {
@@ -67,7 +114,7 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
 
   Future<void> _loadHistory() async {
     try {
-      final messages = await Backend.data.fetchMessages(widget.chat.id);
+      final messages = await Backend.data.fetchMessages(_chat.id);
       if (!mounted) return;
       setState(() {
         _bubbles
@@ -75,7 +122,6 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
           ..addAll(_toBubbles(messages));
         _loading = false;
       });
-      _scrollToEnd();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -87,10 +133,9 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
 
   /// The turns worth re-reading, in order.
   ///
-  /// The recommendation and everything after it. The intake and the adaptive
-  /// questions are how we got here, not part of the conversation the user is
-  /// now having — and the free-text description is the one exception, because
-  /// it is the thing they actually said in their own words.
+  /// The recommendation and everything after it. The free-text description is
+  /// the one earlier exception, because it is the thing they actually said in
+  /// their own words — and it is what the advice was answering.
   List<_Bubble> _toBubbles(List<Message> messages) {
     final recommendationIndex =
         messages.indexWhere((m) => m.type == MessageType.recommendation);
@@ -103,6 +148,11 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
 
       switch (message.type) {
         case MessageType.recommendation:
+          bubbles.add(_Bubble(
+            text: text,
+            fromUser: false,
+            headline: (message.metadata['headline'] as String? ?? '').trim(),
+          ));
         case MessageType.assistantReply:
           bubbles.add(_Bubble(text: text, fromUser: false));
         case MessageType.freeText:
@@ -119,17 +169,39 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
     return bubbles;
   }
 
-  void _scrollToEnd() {
-    // After the frame the new bubble is laid out in, or maxScrollExtent is
-    // still the old one and the newest message stays just below the fold.
+  /// Scrolls to the newest message.
+  ///
+  /// `jumpTo(0)` rather than `maxScrollExtent` because the list is reversed —
+  /// see the note on the ListView. Offset zero is the bottom.
+  void _toNewest({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (animate) {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scrollController.jumpTo(0);
+      }
     });
+  }
+
+  /// Puts a finished chat back into the conversation before its first new turn.
+  ///
+  /// Best-effort: if the write fails the message still sends and the reply still
+  /// arrives, because refusing to talk to someone over a status flag would be
+  /// absurd. The cost of it failing is that this chat's memory merge does not
+  /// re-run — which is what [completeChat] would have skipped anyway.
+  Future<void> _reopenIfNeeded() async {
+    if (_chat.status != ChatStatus.completed) return;
+    try {
+      final reopened = await Backend.data.reopenChat(_chat.id);
+      if (mounted) setState(() => _chat = reopened);
+    } catch (e) {
+      debugPrint('ThoughtLoom: could not reopen chat ${_chat.id} — $e');
+    }
   }
 
   Future<void> _send({String? retrying}) async {
@@ -143,24 +215,26 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
       _sending = true;
       _error = null;
       _failedMessage = null;
-      // Shown immediately rather than after the round trip: a message that
-      // hangs in a text box for thirty seconds feels like it was not sent.
+      // Shown immediately rather than after the round trip: a message that hangs
+      // in a text box for thirty seconds feels like it was not sent.
       if (retrying == null) {
         _bubbles.add(_Bubble(text: text, fromUser: true));
         _composer.clear();
       }
     });
-    _scrollToEnd();
+    _toNewest();
+
+    await _reopenIfNeeded();
+    if (!mounted) return;
 
     try {
-      final reply =
-          await Backend.ai.followUp(chatId: widget.chat.id, message: text);
+      final reply = await Backend.ai.followUp(chatId: _chat.id, message: text);
       if (!mounted) return;
       setState(() {
         _bubbles.add(_Bubble(text: reply, fromUser: false));
         _sending = false;
       });
-      _scrollToEnd();
+      _toNewest();
     } on AiFailure catch (e) {
       if (!mounted) return;
       setState(() {
@@ -171,20 +245,17 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
     }
   }
 
-  /// Leaving ends the chat — see [completeChat], which also asks the API to
-  /// name it and fold what it learned into the user's memory. Never throws: the
-  /// user asked to leave, and a failed write must not trap them.
+  /// Leaving ends the chat — see [completeChat], which also asks the API to name
+  /// it and fold what it learned into the user's memory. Never throws: the user
+  /// asked to leave, and a failed write must not trap them.
   Future<void> _finish() async {
     final navigator = Navigator.of(context);
-    await completeChat(widget.chat);
-    if (mounted) navigator.popUntil((route) => route.isFirst);
+    await completeChat(_chat);
+    if (mounted) navigator.pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -193,39 +264,29 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
       child: AppBackground(
         child: Column(
           children: [
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: screenWidth * 0.06,
-                vertical: screenHeight * 0.015,
-              ),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: _finish,
-                    behavior: HitTestBehavior.opaque,
-                    child: Padding(
-                      padding: EdgeInsets.only(right: screenWidth * 0.03),
-                      child: Icon(
-                        Icons.arrow_back,
-                        size: screenWidth * 0.055,
-                        color: AppTheme.textLight,
-                      ),
+            AppHeader(
+              title: _chat.title ?? _chat.category.label,
+              subtitle: 'Still talking',
+              onBack: _finish,
+              actions: [
+                HeaderIconButton(
+                  icon: Icons.receipt_long_outlined,
+                  tooltip: 'The whole conversation',
+                  // The full record, including the scripted opening this screen
+                  // deliberately hides. Read-only, and it does not end the chat.
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      // No backfill: that exists to finish closing a chat opened
+                      // from history, and this one is mid-conversation. Asking
+                      // the API to close a chat the user is still typing into
+                      // would be a strange thing to do to them.
+                      builder: (_) =>
+                          ChatTranscriptScreen(chat: _chat, backfill: false),
                     ),
                   ),
-                  Expanded(
-                    child: Text(
-                      '${widget.chat.category.label} · Still talking',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.038,
-                        color: AppTheme.textLight,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
             Expanded(
               child: _loading
@@ -236,41 +297,29 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
                             AlwaysStoppedAnimation<Color>(AppTheme.primary),
                       ),
                     )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      physics: const BouncingScrollPhysics(),
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenWidth * 0.06,
-                      ),
-                      itemCount: _bubbles.length + (_sending ? 1 : 0),
-                      itemBuilder: (context, i) {
-                        if (i == _bubbles.length) return const _Typing();
-                        return _BubbleView(bubble: _bubbles[i]);
-                      },
-                    ),
+                  : _bubbles.isEmpty
+                      ? const _NothingToContinue()
+                      : _buildList(),
             ),
             if (_error != null)
               Padding(
                 padding: EdgeInsets.fromLTRB(
-                  screenWidth * 0.06,
+                  AppTheme.s5,
                   0,
-                  screenWidth * 0.06,
-                  screenHeight * 0.012,
+                  AppTheme.s5,
+                  AppTheme.s2,
                 ),
                 child: Column(
                   children: [
                     ErrorBanner(message: _error!),
                     if (_failedMessage != null) ...[
-                      SizedBox(height: screenHeight * 0.008),
+                      SizedBox(height: AppTheme.s2),
                       TextButton(
                         onPressed: () => _send(retrying: _failedMessage),
                         child: Text(
                           'Try sending again',
-                          style: TextStyle(
-                            fontSize: screenWidth * 0.036,
-                            color: AppTheme.primary,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: AppTheme.label(context)
+                              .copyWith(color: AppTheme.primary),
                         ),
                       ),
                     ],
@@ -289,13 +338,73 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
       ),
     );
   }
+
+  Widget _buildList() {
+    // reverse: true is what fixes the keyboard.
+    //
+    // The composer used to rise with the keyboard while the conversation sat
+    // exactly where it was, so the message you were replying to went under the
+    // keyboard the moment you started replying to it. That is not a scrolling
+    // bug to paper over with a scroll-on-focus call — animating against a
+    // keyboard that is itself still animating is a race nobody wins.
+    //
+    // A reversed list is anchored to its bottom, so when the viewport shrinks
+    // the newest message stays put and everything older slides up behind it,
+    // which is what every chat app does and what the eye expects. It costs one
+    // reversed index and buys the whole problem away.
+    final items = [
+      if (_sending) const _Typing(),
+      for (final bubble in _bubbles.reversed) _BubbleView(bubble: bubble),
+    ];
+
+    return ListView.builder(
+      controller: _scrollController,
+      reverse: true,
+      physics: const BouncingScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(
+        AppTheme.s5,
+        AppTheme.s4,
+        AppTheme.s5,
+        AppTheme.s3,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, i) => items[i],
+    );
+  }
+}
+
+/// A chat that never got as far as advice. Reachable only if history's routing
+/// is wrong, so it says something honest rather than showing an empty box.
+class _NothingToContinue extends StatelessWidget {
+  const _NothingToContinue();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.all(AppTheme.s8),
+        child: Text(
+          'There is nothing to carry on from here yet.',
+          textAlign: TextAlign.center,
+          style: AppTheme.secondary(context),
+        ),
+      ),
+    );
+  }
 }
 
 class _Bubble {
   final String text;
   final bool fromUser;
 
-  const _Bubble({required this.text, required this.fromUser});
+  /// The verdict line, on the recommendation bubble only.
+  final String headline;
+
+  const _Bubble({
+    required this.text,
+    required this.fromUser,
+    this.headline = '',
+  });
 }
 
 class _BubbleView extends StatelessWidget {
@@ -305,39 +414,63 @@ class _BubbleView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final scale = AppTheme.scaleOf(context);
+    final fromUser = bubble.fromUser;
 
     return Align(
-      alignment: bubble.fromUser ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: fromUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(maxWidth: screenWidth * 0.78),
-        margin: EdgeInsets.only(bottom: screenWidth * 0.03),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+        ),
+        margin: EdgeInsets.only(bottom: AppTheme.s3),
         padding: EdgeInsets.symmetric(
-          horizontal: screenWidth * 0.045,
-          vertical: screenWidth * 0.035,
+          horizontal: AppTheme.s4,
+          vertical: AppTheme.s3 + 2,
         ),
         decoration: BoxDecoration(
           // The user's own words in sage, ours in cream — the same pairing the
           // option rows use for chosen and unchosen.
-          color: bubble.fromUser
-              ? AppTheme.primary
-              : AppTheme.cardBg.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              offset: const Offset(0, 3),
-              blurRadius: 10,
-            ),
-          ],
-        ),
-        child: Text(
-          bubble.text,
-          style: TextStyle(
-            fontSize: screenWidth * 0.038,
-            color: bubble.fromUser ? Colors.white : AppTheme.textOnCard,
-            height: 1.5,
+          color: fromUser ? AppTheme.primary : AppTheme.cardBg,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(AppTheme.rMd),
+            topRight: const Radius.circular(AppTheme.rMd),
+            // The tail: the corner nearest its owner is squared off, which is
+            // what says who said it without a label.
+            bottomLeft: Radius.circular(fromUser ? AppTheme.rMd : 4),
+            bottomRight: Radius.circular(fromUser ? 4 : AppTheme.rMd),
           ),
+          border: fromUser ? null : Border.all(color: AppTheme.border),
+          boxShadow: AppTheme.shadowSoft,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (bubble.headline.isNotEmpty) ...[
+              Text(
+                bubble.headline,
+                style: AppTheme.heading(context).copyWith(
+                  fontSize: 17 * scale,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              SizedBox(height: AppTheme.s3),
+            ],
+            // The user's own text is not markdown — they typed it, and a stray
+            // asterisk in "I *hate* this" is theirs to keep, not ours to style.
+            if (fromUser)
+              Text(
+                bubble.text,
+                style: AppTheme.body(context).copyWith(color: Colors.white),
+              )
+            else
+              RichBody(
+                markdown: bubble.text,
+                baseStyle: AppTheme.body(context),
+                allowCallouts: false,
+              ),
+          ],
         ),
       ),
     );
@@ -349,39 +482,32 @@ class _Typing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        margin: EdgeInsets.only(bottom: screenWidth * 0.03),
+        margin: EdgeInsets.only(bottom: AppTheme.s3),
         padding: EdgeInsets.symmetric(
-          horizontal: screenWidth * 0.045,
-          vertical: screenWidth * 0.04,
+          horizontal: AppTheme.s4,
+          vertical: AppTheme.s3 + 2,
         ),
         decoration: BoxDecoration(
-          color: AppTheme.cardBg.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(20),
+          color: AppTheme.cardBg,
+          borderRadius: BorderRadius.circular(AppTheme.rMd),
+          border: Border.all(color: AppTheme.border),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: screenWidth * 0.04,
-              height: screenWidth * 0.04,
-              child: const CircularProgressIndicator(
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
                 strokeWidth: 2,
                 valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
               ),
             ),
-            SizedBox(width: screenWidth * 0.03),
-            Text(
-              'Thinking...',
-              style: TextStyle(
-                fontSize: screenWidth * 0.036,
-                color: AppTheme.textLight,
-              ),
-            ),
+            SizedBox(width: AppTheme.s3),
+            Text('Thinking...', style: AppTheme.meta(context)),
           ],
         ),
       ),
@@ -406,90 +532,100 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final scale = AppTheme.scaleOf(context);
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        screenWidth * 0.06,
+        AppTheme.s4,
         0,
-        screenWidth * 0.06,
-        screenWidth * 0.04,
+        AppTheme.s4,
+        AppTheme.s3,
       ),
-      child: Container(
+      child: DecoratedBox(
         decoration: BoxDecoration(
-          color: AppTheme.cardBg.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(AppTheme.pillRadius),
-          border: dictation.listening
-              ? Border.all(
-                  color: AppTheme.primary.withValues(alpha: 0.6),
-                  width: 2,
-                )
-              : null,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              offset: const Offset(0, 4),
-              blurRadius: 12,
-            ),
-          ],
+          borderRadius: BorderRadius.circular(AppTheme.rLg),
+          boxShadow: AppTheme.shadowLifted,
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            SizedBox(width: screenWidth * 0.04),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                enabled: enabled,
-                maxLines: 4,
-                minLines: 1,
-                onChanged: (_) => onChanged(),
-                keyboardType: TextInputType.multiline,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.04,
-                  color: AppTheme.textOnCard,
-                  height: 1.4,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Say more...',
-                  hintStyle: TextStyle(
-                    fontSize: screenWidth * 0.04,
-                    color: AppTheme.textLight.withValues(alpha: 0.5),
-                  ),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    vertical: screenWidth * 0.035,
-                  ),
-                ),
-              ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            color: AppTheme.cardBg,
+            borderRadius: BorderRadius.circular(AppTheme.rLg),
+            border: Border.all(
+              color: dictation.listening ? AppTheme.live : AppTheme.border,
+              width: dictation.listening ? 1.8 : 1,
             ),
-            if (dictation.available)
-              DictationIconButton(
-                controller: dictation,
-                onPressed: enabled ? dictation.toggle : null,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  enabled: enabled,
+                  maxLines: 5,
+                  minLines: 1,
+                  onChanged: (_) => onChanged(),
+                  // Reaching for the keyboard turns the mic off — otherwise the
+                  // next partial result overwrites what was typed.
+                  onTap: dictation.stop,
+                  keyboardType: TextInputType.multiline,
+                  textCapitalization: TextCapitalization.sentences,
+                  cursorColor:
+                      dictation.listening ? AppTheme.live : AppTheme.primary,
+                  style: AppTheme.body(context),
+                  decoration: InputDecoration(
+                    hintText: dictation.listening ? 'Listening...' : 'Say more...',
+                    hintStyle: AppTheme.body(context)
+                        .copyWith(color: AppTheme.textFaint),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.fromLTRB(
+                      AppTheme.s4,
+                      AppTheme.s3 + 2,
+                      AppTheme.s2,
+                      AppTheme.s3 + 2,
+                    ),
+                  ),
+                ),
               ),
-            GestureDetector(
-              onTap: onSend,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                margin: EdgeInsets.all(screenWidth * 0.015),
-                width: screenWidth * 0.11,
-                height: screenWidth * 0.11,
-                decoration: BoxDecoration(
+              if (dictation.available)
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppTheme.s1 + 2),
+                  child: DictationIconButton(
+                    controller: dictation,
+                    onPressed: enabled
+                        ? () {
+                            FocusScope.of(context).unfocus();
+                            dictation.toggle();
+                          }
+                        : null,
+                  ),
+                ),
+              Padding(
+                padding: EdgeInsets.all(AppTheme.s1 + 2),
+                child: Material(
                   color: onSend == null
-                      ? AppTheme.primary.withValues(alpha: 0.35)
+                      ? AppTheme.primary.withValues(alpha: 0.3)
                       : AppTheme.primary,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.arrow_upward,
-                  size: screenWidth * 0.05,
-                  color: Colors.white,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: onSend,
+                    child: SizedBox(
+                      width: 38 * scale,
+                      height: 38 * scale,
+                      child: Icon(
+                        Icons.arrow_upward_rounded,
+                        size: 19 * scale,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

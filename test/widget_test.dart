@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:thoughtloom/data/onboarding_questions.dart';
 import 'package:thoughtloom/main.dart';
+import 'package:thoughtloom/screens/login_screen.dart';
 import 'package:thoughtloom/screens/register_screen.dart';
 import 'package:thoughtloom/services/backend.dart';
 
@@ -17,18 +18,21 @@ void main() {
 
   /// Left on the default 800x600 viewport deliberately.
   ///
-  /// The theme asks for 'Inter', which the bundle does not ship, so tests fall
-  /// back to a font whose every glyph is a full em square. Text measures far
-  /// wider here than on a device, and pinning a realistic phone size makes the
-  /// existing screens report overflows that no user can hit. These tests cover
-  /// behaviour, not layout.
+  /// Inter ships in the bundle now, but `flutter test` does not register a
+  /// pubspec font without a FontLoader — so text here is still measured in a
+  /// fallback whose glyphs are wider than the real thing, and pinning a phone
+  /// viewport would report overflows no user can hit. These tests cover
+  /// behaviour, not layout; `history_test.dart` does the layout pass.
   Future<void> pumpApp(WidgetTester tester) =>
       tester.pumpWidget(const ThoughtLoomApp());
 
   Future<void> openRegister(WidgetTester tester) async {
     await pumpApp(tester);
     await tester.pumpAndSettle(const Duration(seconds: 1));
-    await tester.tap(find.text('Start Thinking Clearly'));
+    // Landing now leads with "Sign in" — registering is the second button,
+    // because signing up is the thing you do once and signing in is the thing
+    // you do forever afterwards.
+    await tester.tap(find.text('Create an account'));
     await tester.pumpAndSettle();
   }
 
@@ -45,25 +49,40 @@ void main() {
   }
 
   Future<void> tapCreateAccount(WidgetTester tester) async {
-    final button = find.text('Create Account');
+    final button = find.text('Create account');
     await tester.ensureVisible(button);
     await tester.pumpAndSettle();
     await tester.tap(button);
     await tester.pumpAndSettle();
   }
 
-  testWidgets('Landing screen shows branding and reveals the CTA', (tester) async {
+  testWidgets('Landing screen shows branding and reveals both ways in',
+      (tester) async {
     await pumpApp(tester);
 
     expect(find.text('ThoughtLoom'), findsOneWidget);
     expect(find.text('Weave clarity into your decisions.'), findsOneWidget);
 
-    // The CTA fades in on a delay, so settle the animation before asserting.
+    // The CTAs fade in on a delay, so settle the animation before asserting.
     await tester.pumpAndSettle(const Duration(seconds: 1));
-    expect(find.text('Start Thinking Clearly'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Create an account'), findsOneWidget);
   });
 
-  testWidgets('Tapping the CTA opens the register screen', (tester) async {
+  testWidgets('Signing in is the primary way back in', (tester) async {
+    await pumpApp(tester);
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    // The regression this pins: the landing page used to offer one button and it
+    // went to the sign-up form, so a returning user whose session had expired was
+    // shown a registration form and had to find the way to their own account in
+    // a link underneath it.
+    expect(find.byType(LoginScreen), findsOneWidget);
+  });
+
+  testWidgets('Creating an account opens the register screen', (tester) async {
     await openRegister(tester);
     expect(find.byType(RegisterScreen), findsOneWidget);
   });
@@ -87,7 +106,7 @@ void main() {
     await pumpApp(tester);
     await tester.pumpAndSettle();
 
-    expect(find.text('Start Thinking Clearly'), findsNothing);
+    expect(find.text('Sign in'), findsNothing);
     expect(find.text(firstQuestion), findsOneWidget);
   });
 

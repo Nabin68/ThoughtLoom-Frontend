@@ -1,9 +1,24 @@
 //landing_screen.dart
 
 import 'package:flutter/material.dart';
+
+import '../theme/app_theme.dart';
+import '../widgets/app_background.dart';
+import '../widgets/app_button.dart';
+import 'login_screen.dart';
 import 'register_screen.dart';
 
-
+/// The signed-out front door.
+///
+/// ### Signing in is the primary action now
+///
+/// It used to offer exactly one button — "Start Thinking Clearly" — and it went
+/// to the register screen. So every returning user whose session had expired was
+/// shown a sign-up form and had to work out that the way back into their own
+/// account was a link at the bottom of it. Registering is the thing you do once;
+/// signing in is the thing you do forever after, and it should be the button.
+///
+/// Creating an account is still one tap, and still says what it is.
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
 
@@ -11,142 +26,71 @@ class LandingScreen extends StatefulWidget {
   State<LandingScreen> createState() => _LandingScreenState();
 }
 
-class _LandingScreenState extends State<LandingScreen>
-    with SingleTickerProviderStateMixin {
-
-  bool showContent = false;
+class _LandingScreenState extends State<LandingScreen> {
+  bool _showContent = false;
 
   @override
   void initState() {
     super.initState();
-
-    // Delay to trigger second phase animation
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        setState(() {
-          showContent = true;
-        });
-      }
+    // Lets the logo land before the words arrive under it.
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) setState(() => _showContent = true);
     });
   }
 
+  void _go(Widget screen) => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => screen),
+      );
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          // 🔹 Background
-          Positioned.fill(
-            child: Image.asset(
-              'assets/background.png',
-              fit: BoxFit.cover,
+    return AppBackground(
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: AppTheme.s6),
+        child: Column(
+          children: [
+            const Spacer(flex: 3),
+            AnimatedSlide(
+              offset: _showContent ? const Offset(0, -0.1) : Offset.zero,
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOut,
+              child: Image.asset('assets/logo.png', height: 92),
             ),
-          ),
-
-          // 🔹 Foreground content
-          SafeArea(
-            child: Column(
-              children: [
-                const Spacer(flex: 3),
-
-                // 🔹 Logo animation
-                AnimatedSlide(
-                  offset: showContent
-                      ? const Offset(0, -0.15)
-                      : Offset.zero,
-                  duration: const Duration(milliseconds: 600),
-                  curve: Curves.easeOut,
-                  child: AnimatedOpacity(
-                    opacity: 1,
-                    duration: const Duration(milliseconds: 600),
-                    child: Image.asset(
-                      'assets/logo.png',
-                      height: 80,
-                    ),
+            SizedBox(height: AppTheme.s5),
+            AnimatedOpacity(
+              opacity: _showContent ? 1 : 0,
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOut,
+              child: Column(
+                children: [
+                  Text(
+                    'ThoughtLoom',
+                    style: AppTheme.display(context).copyWith(fontSize: 32),
                   ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // 🔹 Brand text + CTA
-                AnimatedOpacity(
-                  opacity: showContent ? 1 : 0,
-                  duration: const Duration(milliseconds: 600),
-                  curve: Curves.easeOut,
-                  child: Column(
-                    children: [
-                      const Text(
-                        "ThoughtLoom",
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF2E3A3F),
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      const Text(
-                        "Weave clarity into your decisions.",
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Color(0xFF5F6F78),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-
-                      const SizedBox(height: 40),
-
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: SizedBox(
-                          width: double.infinity,
-                          height: 52,
-                          child: ElevatedButton(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const RegisterScreen(),
-                                ),
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF6F8F9B),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(30),
-                              ),
-                              elevation: 6,
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  "Start Thinking Clearly",
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                                Icon(
-                                  Icons.arrow_forward,
-                                  color: Colors.white,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                  SizedBox(height: AppTheme.s2),
+                  Text(
+                    'Weave clarity into your decisions.',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.secondary(context),
                   ),
-                ),
-                const Spacer(flex: 4),
-              ],
+                  SizedBox(height: AppTheme.s10),
+                  AppButton(
+                    label: 'Sign in',
+                    icon: Icons.arrow_forward_rounded,
+                    onPressed: () => _go(const LoginScreen()),
+                  ),
+                  SizedBox(height: AppTheme.s3),
+                  AppButton.secondary(
+                    label: 'Create an account',
+                    onPressed: () => _go(const RegisterScreen()),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const Spacer(flex: 4),
+          ],
+        ),
       ),
     );
   }

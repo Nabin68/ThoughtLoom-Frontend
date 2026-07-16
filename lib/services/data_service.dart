@@ -84,6 +84,25 @@ abstract class DataService {
 
   Future<Chat> saveChat(Chat chat);
 
+  /// Puts a finished chat back into the conversation.
+  ///
+  /// Two writes that have to happen together, which is why this is its own
+  /// method rather than a [saveChat] with a different status:
+  ///
+  ///  * `status` back to `awaiting_follow_up`, so the chat is live again; and
+  ///  * **`memory_merged_at` back to null**, which is the load-bearing half.
+  ///    Completing a chat folds it into the user's long-term memory *once* —
+  ///    `memory_merged_at` is the flag that makes that idempotent. Reopening a
+  ///    chat and saying something new to it would otherwise never reach memory
+  ///    at all: the merge would be skipped as already done, silently, forever.
+  ///    Clearing it is safe because the merge is a whole-memory rewrite that
+  ///    updates rather than appends, so re-running it over a longer version of
+  ///    the same conversation is exactly what should happen.
+  ///
+  /// `memory_merged_at` is deliberately not on the [Chat] model: nothing in the
+  /// app reads it, and the only write it will ever need is this one.
+  Future<Chat> reopenChat(String chatId);
+
   /// Cascades to the chat's messages.
   Future<void> deleteChat(String chatId);
 
@@ -116,6 +135,16 @@ abstract class DataService {
   });
 
   Future<Message> saveMessage(Message message);
+
+  /// Removes one turn.
+  ///
+  /// Exists for a narrow case: the relationship intake words its later questions
+  /// around the person the first one established, so going back and changing
+  /// "My girlfriend" to "My parents" leaves rows below it answering questions
+  /// that were never asked of this chat. Those rows are wrong, not merely stale
+  /// — the model reads the transcript as fact — so the flow deletes them rather
+  /// than leaving them to be reasoned over. See [IntakeFlowScreen].
+  Future<void> deleteMessage(String messageId);
 
   // --- memory --------------------------------------------------------------
 

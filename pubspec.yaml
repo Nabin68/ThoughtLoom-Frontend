@@ -1,5 +1,5 @@
 name: thoughtloom
-description: "A new Flutter project."
+description: "ThoughtLoom — weave clarity into your decisions."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -98,9 +98,30 @@ flutter:
     - assets/logo.png
     - assets/loading.jpeg
 
+  # AppTheme has asked for Inter since Prompt 1, but nothing ever shipped it —
+  # so every screen has silently been rendering in Roboto (Android) or SF (iOS).
+  # These are static instances cut from the Inter variable font at the only four
+  # weights the app uses, which keeps fontWeight mapping to a real face rather
+  # than depending on the engine pinning a variable axis.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+
 flutter_launcher_icons:
   android: true
   ios: true
+  # iOS rejects an icon with an alpha channel; the source is squared onto its
+  # own cream plate, so there is none to remove, but the flag keeps a future
+  # re-export from failing App Store validation.
+  remove_alpha_ios: true
 
   web:
     generate: true
@@ -114,6 +135,9 @@ flutter_launcher_icons:
 
   image_path: "assets/appicon.png"
   adaptive_icon_background: "#F5F3EE"
-  adaptive_icon_foreground: "assets/appicon.png"
+  # Not appicon.png: Android crops an adaptive icon to a mask that can be as
+  # tight as 66% of the canvas, and the loop drawn edge-to-edge loses its rim to
+  # it. The _foreground variant is the same artwork inset to the safe zone.
+  adaptive_icon_foreground: "assets/appicon_foreground.png"
 
 

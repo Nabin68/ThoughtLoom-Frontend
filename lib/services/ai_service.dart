@@ -35,12 +35,22 @@ class AdaptiveTurn {
   /// the free-text fallback is the app's, and is always offered.
   final List<String> options;
 
+  /// Whether this question takes more than one answer.
+  ///
+  /// Decided per question by the model, because it is a property of the question
+  /// and not of the screen: "which of these are you deciding between" has one
+  /// answer, and "why does it feel like this" never does. Defaults false, so a
+  /// server that has not been redeployed yet — or a model that omits the field —
+  /// behaves exactly as it did before this existed.
+  final bool multi;
+
   const AdaptiveTurn({
     required this.done,
     required this.round,
     this.messageId,
     this.question,
     this.options = const [],
+    this.multi = false,
   });
 }
 
@@ -57,7 +67,21 @@ class Source {
 }
 
 class Recommendation {
+  /// The verdict, in one sentence, meant to be read alone and first.
+  ///
+  /// The answer used to open with whatever the model's first paragraph happened
+  /// to be, which buried the actual position — the one thing the user came for —
+  /// somewhere in the middle of three hundred words. Making it a separate field
+  /// rather than "the first line of the body" means the model has to *commit* to
+  /// a sentence that survives standing on its own.
+  ///
+  /// Empty against a server that predates it, in which case the body simply
+  /// leads, exactly as it used to.
+  final String headline;
+
+  /// The body, in the Markdown subset [RichBody] renders.
   final String text;
+
   final List<String> nextSteps;
   final String confidence;
 
@@ -67,6 +91,7 @@ class Recommendation {
 
   const Recommendation({
     required this.text,
+    this.headline = '',
     this.nextSteps = const [],
     this.confidence = '',
     this.sources = const [],
@@ -74,6 +99,7 @@ class Recommendation {
   });
 
   factory Recommendation.fromJson(Map<String, dynamic> json) => Recommendation(
+        headline: (json['headline'] as String? ?? '').trim(),
         text: json['recommendation'] as String? ?? '',
         nextSteps:
             (json['next_steps'] as List? ?? []).whereType<String>().toList(),
@@ -91,10 +117,17 @@ class Recommendation {
 abstract class AiService {
   /// Records [answer] against the question it belongs to, then returns the next
   /// question — or `done`. Omit [answer] on the first call of a chat.
+  ///
+  /// [answer] is always the whole answer as the user gave it: for a multi-select
+  /// question, the ticked options joined by [selectionSeparator]. [selections]
+  /// carries the same options apart, so the server can keep them structured
+  /// without either side having to parse a delimiter back out of prose the user
+  /// may well have typed a semicolon into.
   Future<AdaptiveTurn> nextQuestion({
     required String chatId,
     String? answerToMessageId,
     String? answer,
+    List<String>? selections,
   });
 
   Future<Recommendation> recommendation({required String chatId});
@@ -199,13 +232,19 @@ class HttpAiService implements AiService {
     required String chatId,
     String? answerToMessageId,
     String? answer,
+    List<String>? selections,
   }) async {
     final json = await _post(
       ApiConfig.adaptiveQuestionUrl,
       {
         'chat_id': chatId,
         if (answer != null && answerToMessageId != null)
-          'answer': {'message_id': answerToMessageId, 'text': answer},
+          'answer': {
+            'message_id': answerToMessageId,
+            'text': answer,
+            if (selections != null && selections.isNotEmpty)
+              'selections': selections,
+          },
       },
       timeout: ApiConfig.requestTimeout,
     );
@@ -215,6 +254,7 @@ class HttpAiService implements AiService {
       messageId: json['message_id'] as String?,
       question: json['question'] as String?,
       options: (json['options'] as List? ?? []).whereType<String>().toList(),
+      multi: json['multi'] as bool? ?? false,
     );
   }
 

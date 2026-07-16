@@ -9,6 +9,9 @@ import '../services/backend.dart';
 import '../services/data_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
+import '../widgets/app_button.dart';
+import '../widgets/app_card.dart';
+import '../widgets/app_header.dart';
 import '../widgets/error_banner.dart';
 import 'chat_transcript_screen.dart';
 import 'continued_chat_screen.dart';
@@ -23,21 +26,31 @@ import 'continued_chat_screen.dart';
 /// problem in order to solve nothing. Search is the same two ILIKE queries, for
 /// the same reason. See [DataService.searchChats].
 ///
-/// ### What a tap does depends on where the chat got to
+/// ### What a tap does
 ///
-/// Prompt 3 left this open. The answer follows from `status`, because status is
-/// already the record of how far a chat got:
+/// It follows `status`, because status is already the record of how far a chat
+/// got — but the rule has changed. It used to be:
 ///
-///  * `awaiting_follow_up` — the advice landed and they closed the app on it.
-///    They are mid-conversation. Tapping resumes it.
-///  * anything else — a record to read back. Completed chats are the point;
-///    an unfinished one opens too, and honestly shows the little it holds.
+///   awaiting_follow_up -> resume;  anything else -> read-only
 ///
-/// Resuming an *unfinished* intake is deliberately not offered. The scripted
-/// questions branch on a profile that may have changed since, so "carry on from
-/// question three" would mean rebuilding a list that no longer matches what was
-/// asked — a wrong-data bug in exchange for saving four taps on a chat the user
-/// walked away from.
+/// which made `completed` — the status of every chat anyone ever finished
+/// properly — a dead end. The advice landed, the user left, and the conversation
+/// could never be picked up again. That is backwards: a finished chat is the one
+/// most likely to be worth returning to, because life moved and the advice can
+/// now be tested against it.
+///
+/// The rule is now "did this chat ever produce advice?":
+///
+///  * `awaiting_follow_up` or `completed` — there is a recommendation in it.
+///    Tapping carries on the conversation; [ContinuedChatScreen] reopens a
+///    completed one properly, and links to the full transcript.
+///  * `in_progress` — abandoned before any advice. There is nothing to continue,
+///    so it opens read-only and honestly shows the little it holds.
+///
+/// Resuming an unfinished *intake* is still not offered. The scripted questions
+/// branch on a profile that may have changed since — and now on earlier answers
+/// too — so "carry on from question three" means rebuilding a list that no
+/// longer matches what was asked.
 ///
 /// [userId] is passed in rather than read from `SessionScope`: this is a pushed
 /// route, and `SessionScope` lives inside `AuthGate`, which is the *home* route.
@@ -105,14 +118,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => chat.status == ChatStatus.awaitingFollowUp
-            ? ContinuedChatScreen(chat: chat)
-            : ChatTranscriptScreen(chat: chat),
+        builder: (_) => chat.status == ChatStatus.inProgress
+            ? ChatTranscriptScreen(chat: chat)
+            : ContinuedChatScreen(chat: chat),
       ),
     );
     // Reloaded on return because both destinations can change what this list
-    // shows: leaving a resumed chat completes it, and opening an untitled one
-    // asks for its title back.
+    // shows: leaving a resumed chat completes it and may retitle it, and opening
+    // an untitled one asks for its title back.
     if (mounted) _load();
   }
 
@@ -126,9 +139,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     try {
       await Backend.data.deleteChat(chat.id);
       if (!mounted) return;
-      // Dropped from the list in place rather than by reloading: the row is
-      // gone from the database, and a spinner over the whole list to prove it
-      // would be a worse answer than it simply not being there.
+      // Dropped from the list in place rather than by reloading: the row is gone
+      // from the database, and a spinner over the whole list to prove it would be
+      // a worse answer than it simply not being there.
       setState(() => _hits?.removeWhere((h) => h.chat.id == chat.id));
     } on DataFailure catch (e) {
       if (!mounted) return;
@@ -138,42 +151,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return AppBackground(
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.06),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(height: screenHeight * 0.02),
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: EdgeInsets.only(right: screenWidth * 0.03),
-                    child: Icon(
-                      Icons.arrow_back,
-                      size: screenWidth * 0.055,
-                      color: AppTheme.textLight,
-                    ),
-                  ),
-                ),
-                Text(
-                  'Your chats',
-                  style: TextStyle(
-                    fontSize: screenWidth * 0.038,
-                    color: AppTheme.textLight,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppHeader(
+            title: 'Your chats',
+            subtitle: 'Everything you have thought through',
+            onBack: () => Navigator.pop(context),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppTheme.s5,
+              AppTheme.s2,
+              AppTheme.s5,
+              AppTheme.s3,
             ),
-            SizedBox(height: screenHeight * 0.02),
-            _SearchField(
+            child: _SearchField(
               controller: _search,
               onChanged: _onQueryChanged,
               onClear: () {
@@ -181,14 +175,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 _onQueryChanged();
               },
             ),
-            SizedBox(height: screenHeight * 0.02),
-            if (_error != null) ...[
-              ErrorBanner(message: _error!),
-              SizedBox(height: screenHeight * 0.015),
-            ],
-            Expanded(child: _buildList()),
+          ),
+          if (_error != null) ...[
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: AppTheme.s5),
+              child: ErrorBanner(message: _error!),
+            ),
+            SizedBox(height: AppTheme.s3),
           ],
-        ),
+          Expanded(child: _buildList()),
+        ],
       ),
     );
   }
@@ -212,11 +208,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return ListView.builder(
       physics: const BouncingScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(
+        AppTheme.s5,
+        0,
+        AppTheme.s5,
+        AppTheme.s8,
+      ),
       itemCount: hits.length,
       itemBuilder: (context, i) => _ChatRow(
         hit: hits[i],
         onTap: () => _open(hits[i].chat),
-        onLongPress: () => _confirmDelete(hits[i].chat),
+        onDelete: () => _confirmDelete(hits[i].chat),
       ),
     );
   }
@@ -235,71 +237,51 @@ class _SearchField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    return Container(
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppTheme.cardBg.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(AppTheme.pillRadius),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            offset: const Offset(0, 4),
-            blurRadius: 12,
-          ),
-        ],
+        boxShadow: AppTheme.shadowSoft,
       ),
-      child: Row(
-        children: [
-          SizedBox(width: screenWidth * 0.045),
-          Icon(
-            Icons.search,
-            size: screenWidth * 0.05,
-            color: AppTheme.textLight,
-          ),
-          SizedBox(width: screenWidth * 0.025),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: (_) => onChanged(),
-              textInputAction: TextInputAction.search,
-              style: TextStyle(
-                fontSize: screenWidth * 0.04,
-                color: AppTheme.textOnCard,
-              ),
-              decoration: InputDecoration(
-                // Says what it searches. "Search" alone would leave the user
-                // guessing whether it matches only the names, which are ours
-                // rather than theirs.
-                hintText: 'Search what you said, or a title',
-                hintStyle: TextStyle(
-                  fontSize: screenWidth * 0.038,
-                  color: AppTheme.textLight.withValues(alpha: 0.5),
-                ),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  vertical: screenWidth * 0.04,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.cardBg,
+          borderRadius: BorderRadius.circular(AppTheme.pillRadius),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Row(
+          children: [
+            SizedBox(width: AppTheme.s4),
+            Icon(Icons.search_rounded, size: 19, color: AppTheme.textFaint),
+            SizedBox(width: AppTheme.s2),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                onChanged: (_) => onChanged(),
+                textInputAction: TextInputAction.search,
+                style: AppTheme.body(context),
+                decoration: InputDecoration(
+                  // Says what it searches. "Search" alone would leave the user
+                  // guessing whether it matches only the names, which are ours
+                  // rather than theirs.
+                  hintText: 'Search what you said, or a title',
+                  hintStyle:
+                      AppTheme.body(context).copyWith(color: AppTheme.textFaint),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: AppTheme.s4),
                 ),
               ),
             ),
-          ),
-          if (controller.text.isNotEmpty)
-            GestureDetector(
-              onTap: onClear,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.04),
-                child: Icon(
-                  Icons.close,
-                  size: screenWidth * 0.045,
-                  color: AppTheme.textLight,
-                ),
-              ),
-            )
-          else
-            SizedBox(width: screenWidth * 0.045),
-        ],
+            if (controller.text.isNotEmpty)
+              HeaderIconButton(
+                icon: Icons.close_rounded,
+                tooltip: 'Clear',
+                onPressed: onClear,
+              )
+            else
+              SizedBox(width: AppTheme.s4),
+          ],
+        ),
       ),
     );
   }
@@ -310,43 +292,33 @@ class _NoChatsYet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    // Scrollable, like the other full-height messages in the app: everything
-    // here is sized off screen *width*, so a short or landscape viewport can
-    // leave the column taller than the space it was given.
+    // Scrollable, like the other full-height messages in the app: a short or
+    // landscape viewport can leave the column taller than the space it was given.
     return Center(
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         child: Padding(
-          padding: EdgeInsets.only(bottom: screenWidth * 0.2),
+          padding: EdgeInsets.fromLTRB(
+            AppTheme.s6,
+            0,
+            AppTheme.s6,
+            AppTheme.s10 * 2,
+          ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 Icons.forum_outlined,
-                size: screenWidth * 0.12,
-                color: AppTheme.textLight.withValues(alpha: 0.4),
+                size: 44,
+                color: AppTheme.textFaint.withValues(alpha: 0.5),
               ),
-              SizedBox(height: screenWidth * 0.04),
-              Text(
-                'Nothing here yet',
-                style: TextStyle(
-                  fontSize: screenWidth * 0.05,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textDark,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              SizedBox(height: screenWidth * 0.02),
+              SizedBox(height: AppTheme.s4),
+              Text('Nothing here yet', style: AppTheme.title(context)),
+              SizedBox(height: AppTheme.s2),
               Text(
                 'Anything you think through will show up here.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.038,
-                  color: AppTheme.textLight,
-                  height: 1.4,
-                ),
+                style: AppTheme.secondary(context),
               ),
             ],
           ),
@@ -363,26 +335,20 @@ class _NoMatches extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Center(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          screenWidth * 0.06,
+          AppTheme.s6,
           0,
-          screenWidth * 0.06,
-          screenWidth * 0.2,
+          AppTheme.s6,
+          AppTheme.s10 * 2,
         ),
         child: Text(
           'Nothing matches "$query".',
           textAlign: TextAlign.center,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: screenWidth * 0.042,
-            color: AppTheme.textLight,
-            height: 1.4,
-          ),
+          style: AppTheme.secondary(context),
         ),
       ),
     );
@@ -396,53 +362,35 @@ class _DeleteDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return AlertDialog(
       backgroundColor: AppTheme.cardBg,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      title: Text(
-        'Delete this chat?',
-        style: TextStyle(
-          fontSize: screenWidth * 0.05,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.textOnCard,
-          letterSpacing: -0.3,
-        ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.rLg),
       ),
+      title: Text('Delete this chat?', style: AppTheme.heading(context)),
       content: Text(
         // Says what actually goes, because it is more than the row they are
         // looking at and none of it comes back.
         '"${chat.title ?? chat.category.label}" and everything said in it. '
         'This cannot be undone.',
-        style: TextStyle(
-          fontSize: screenWidth * 0.038,
-          color: AppTheme.textLight,
-          height: 1.4,
-        ),
+        style: AppTheme.secondary(context),
+      ),
+      actionsPadding: EdgeInsets.fromLTRB(
+        AppTheme.s4,
+        0,
+        AppTheme.s4,
+        AppTheme.s4,
       ),
       actions: [
-        TextButton(
+        AppButton.quiet(
+          label: 'Keep it',
           onPressed: () => Navigator.pop(context, false),
-          child: Text(
-            'Keep it',
-            style: TextStyle(
-              fontSize: screenWidth * 0.038,
-              color: AppTheme.textLight,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
         ),
-        TextButton(
+        SizedBox(width: AppTheme.s2),
+        AppButton.danger(
+          label: 'Delete',
+          expand: false,
           onPressed: () => Navigator.pop(context, true),
-          child: Text(
-            'Delete',
-            style: TextStyle(
-              fontSize: screenWidth * 0.038,
-              color: AppTheme.dangerText,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
         ),
       ],
     );
@@ -452,12 +400,12 @@ class _DeleteDialog extends StatelessWidget {
 class _ChatRow extends StatelessWidget {
   final ChatSearchHit hit;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
+  final VoidCallback onDelete;
 
   const _ChatRow({
     required this.hit,
     required this.onTap,
-    required this.onLongPress,
+    required this.onDelete,
   });
 
   Chat get chat => hit.chat;
@@ -491,30 +439,23 @@ class _ChatRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
     final unfinished = chat.status == ChatStatus.inProgress;
     final excerpt = hit.excerpt;
 
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        margin: EdgeInsets.only(bottom: screenWidth * 0.03),
-        padding: EdgeInsets.symmetric(
-          horizontal: screenWidth * 0.05,
-          vertical: screenWidth * 0.04,
-        ),
-        decoration: BoxDecoration(
-          color: AppTheme.cardBg.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(AppTheme.pillRadius),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              offset: const Offset(0, 4),
-              blurRadius: 12,
-            ),
-          ],
+    return Padding(
+      padding: EdgeInsets.only(bottom: AppTheme.s3),
+      child: AppCard(
+        onTap: onTap,
+        // Long-press still works and is what most people will find first, but it
+        // is no longer the *only* way: an action nobody can see is an action that
+        // does not exist, and these rows accumulate — the dashboard opens a chat
+        // on the category tap, so every mis-tap is a row to clear.
+        onLongPress: onDelete,
+        padding: EdgeInsets.fromLTRB(
+          AppTheme.s4,
+          AppTheme.s4,
+          AppTheme.s2,
+          AppTheme.s4,
         ),
         child: Row(
           children: [
@@ -524,33 +465,34 @@ class _ChatRow extends StatelessWidget {
                 children: [
                   Text(
                     // An untitled chat falls back to its category: either the
-                    // titler has not run yet, or the chat never got far enough
-                    // to have a topic. Both read honestly as "Education".
+                    // titler has not run yet, or the chat never got far enough to
+                    // have a topic. Both read honestly as "Education".
                     chat.title ?? chat.category.label,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: screenWidth * 0.042,
-                      color: AppTheme.textOnCard,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
+                    style: AppTheme.label(context).copyWith(
+                      fontSize: 15.5 * AppTheme.scaleOf(context),
                       height: 1.3,
                     ),
                   ),
-                  SizedBox(height: screenWidth * 0.015),
+                  SizedBox(height: AppTheme.s2),
                   Row(
                     children: [
-                      _CategoryChip(chat: chat),
-                      SizedBox(width: screenWidth * 0.02),
-                      Expanded(
+                      AppChip(label: chat.category.label),
+                      SizedBox(width: AppTheme.s2),
+                      if (unfinished) ...[
+                        const AppChip(
+                          label: 'Unfinished',
+                          color: AppTheme.accentDeep,
+                        ),
+                        SizedBox(width: AppTheme.s2),
+                      ],
+                      Flexible(
                         child: Text(
-                          unfinished ? '$_when · Unfinished' : _when,
+                          _when,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: screenWidth * 0.032,
-                            color: AppTheme.textLight,
-                          ),
+                          style: AppTheme.meta(context),
                         ),
                       ),
                     ],
@@ -558,61 +500,28 @@ class _ChatRow extends StatelessWidget {
                   // Only on a content match. Showing the row's own first line
                   // when the title matched would be noise dressed as evidence.
                   if (excerpt != null) ...[
-                    SizedBox(height: screenWidth * 0.025),
+                    SizedBox(height: AppTheme.s2),
                     Text(
                       excerpt,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.033,
-                        color: AppTheme.textLight,
-                        height: 1.4,
+                      style: AppTheme.meta(context).copyWith(
                         fontStyle: FontStyle.italic,
+                        color: AppTheme.textLight,
                       ),
                     ),
                   ],
                 ],
               ),
             ),
-            SizedBox(width: screenWidth * 0.02),
-            Icon(
-              Icons.arrow_forward,
-              size: screenWidth * 0.04,
-              color: AppTheme.textLight.withValues(alpha: 0.6),
+            SizedBox(width: AppTheme.s1),
+            HeaderIconButton(
+              icon: Icons.delete_outline_rounded,
+              tooltip: 'Delete this chat',
+              color: AppTheme.textFaint,
+              onPressed: onDelete,
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The category, as a quiet chip rather than a word in the subtitle — it is a
-/// fixed label from a set of four, and reads faster as a shape than as prose.
-class _CategoryChip extends StatelessWidget {
-  final Chat chat;
-
-  const _CategoryChip({required this.chat});
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: screenWidth * 0.02,
-        vertical: screenWidth * 0.005,
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        chat.category.label,
-        style: TextStyle(
-          fontSize: screenWidth * 0.028,
-          color: AppTheme.textOnCard,
-          fontWeight: FontWeight.w600,
         ),
       ),
     );

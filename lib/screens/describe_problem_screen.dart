@@ -9,22 +9,32 @@ import '../services/backend.dart';
 import '../services/data_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
+import '../widgets/app_button.dart';
+import '../widgets/app_header.dart';
+import '../widgets/app_text_field.dart';
 import '../widgets/dictation.dart';
 import '../widgets/error_banner.dart';
-import '../widgets/primary_button.dart';
 import 'adaptive_flow_screen.dart';
 
 /// The last scripted screen: the user's own account of the problem, typed or
 /// dictated.
 ///
-/// The MCQs before this one buy structure; this buys the thing the MCQs cannot
-/// — the sentence where someone says what is actually going on. It is saved as
-/// a single `free_text` message.
+/// The MCQs before this one buy structure; this buys the thing the MCQs cannot —
+/// the sentence where someone says what is actually going on. It is saved as a
+/// single `free_text` message.
 ///
-/// Dictation writes into the same controller as the keyboard. There is no
-/// separate voice path and no voice-only state: speech is an input method for
-/// the text field, so what gets saved is identical either way and the user can
-/// dictate a paragraph and then fix a word by hand.
+/// ### Dictation and the keyboard are one input, not two
+///
+/// Speech writes into the same controller as the keyboard, so what gets saved is
+/// identical either way and someone can dictate a paragraph and then fix a word
+/// by hand.
+///
+/// That only works if the two never fight for the field. They used to: the mic
+/// stayed live while the user tapped in to type, and every partial result
+/// rewrote the box from the last committed transcript — deleting what they had
+/// just typed. So reaching for the field now turns the microphone off. Tapping
+/// the text box is a statement of intent, and the intent is "I will type this
+/// bit myself".
 class DescribeProblemScreen extends StatefulWidget {
   final Chat chat;
 
@@ -85,8 +95,8 @@ class _DescribeProblemScreenState extends State<DescribeProblemScreen> {
         chatId: widget.chat.id,
         type: MessageType.freeText,
         // No questionText: free_text means the user's own words, and the model
-        // documents this type as leaving the question null. The prompt they
-        // were answering is a constant of this screen, not data.
+        // documents this type as leaving the question null. The prompt they were
+        // answering is a constant of this screen, not data.
         answerText: text,
         metadata: {
           'input_method': _dictation.usedDictation ? 'voice' : 'typed',
@@ -117,104 +127,93 @@ class _DescribeProblemScreenState extends State<DescribeProblemScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final horizontalPadding = screenWidth * 0.06;
     final hasText = _controller.text.trim().isNotEmpty;
 
     return AppBackground(
       child: Column(
         children: [
-          Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: horizontalPadding,
-              vertical: screenHeight * 0.02,
-            ),
-            child: Row(
-              children: [
-                // Expanded + ellipsis rather than a bare Text: the label is
-                // sized off screen width, so a wide viewport or a large system
-                // font would otherwise overflow the row.
-                Expanded(
-                  child: Text(
-                    '${widget.chat.category.label} · In your words',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: screenWidth * 0.038,
-                      color: AppTheme.textLight,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          AppHeader(
+            title: widget.chat.category.label,
+            subtitle: 'In your words',
+            onBack: () => Navigator.pop(context),
           ),
           Expanded(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(height: screenHeight * 0.01),
-                    Text(
-                      'So — what is going on?',
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.08,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textDark,
-                        height: 1.2,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    SizedBox(height: screenHeight * 0.015),
-                    Text(
-                      _dictation.available
-                          ? 'Say it however it comes out. Type, or tap the mic\nand talk.'
-                          : 'Say it however it comes out — there is no wrong way\nto put it.',
-                      style: TextStyle(
-                        fontSize: screenWidth * 0.038,
-                        color: AppTheme.textLight,
-                        height: 1.4,
-                      ),
-                    ),
-                    SizedBox(height: screenHeight * 0.03),
-                    _ProblemField(
-                      controller: _controller,
-                      enabled: !_saving,
-                      listening: _dictation.listening,
-                      onChanged: () => setState(() {}),
-                    ),
-                    SizedBox(height: screenHeight * 0.02),
-                    if (_dictation.available)
-                      DictationButton(
+              padding: EdgeInsets.fromLTRB(
+                AppTheme.s5,
+                AppTheme.s4,
+                AppTheme.s5,
+                AppTheme.s6,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('So — what is going on?', style: AppTheme.display(context)),
+                  SizedBox(height: AppTheme.s3),
+                  Text(
+                    _dictation.available
+                        ? 'Say it however it comes out. Type it, or tap the mic '
+                            'and talk — it is the same box either way.'
+                        : 'Say it however it comes out — there is no wrong way '
+                            'to put it.',
+                    style: AppTheme.secondary(context),
+                  ),
+                  SizedBox(height: AppTheme.s5),
+                  AppTextField(
+                    controller: _controller,
+                    hintText: 'I keep going back and forth on this because...',
+                    enabled: !_saving,
+                    maxLines: 12,
+                    minLines: 7,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    listening: _dictation.listening,
+                    onChanged: (_) => setState(() {}),
+                    // Reaching for the keyboard turns the mic off. Without this
+                    // the recogniser's next partial result overwrites whatever
+                    // was typed in the meantime.
+                    onTap: _dictation.stop,
+                  ),
+                  if (_dictation.available) ...[
+                    SizedBox(height: AppTheme.s4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: DictationButton(
                         controller: _dictation,
-                        onPressed: _saving ? null : _dictation.toggle,
+                        onPressed: _saving
+                            ? null
+                            : () {
+                                // Dismisses the keyboard, which would otherwise
+                                // sit over the field the words are landing in —
+                                // and which, being focused, is also a race with
+                                // the onTap above.
+                                FocusScope.of(context).unfocus();
+                                _dictation.toggle();
+                              },
                       ),
-                    SizedBox(height: screenHeight * 0.03),
+                    ),
                   ],
-                ),
+                ],
               ),
             ),
           ),
           Padding(
             padding: EdgeInsets.fromLTRB(
-              horizontalPadding,
+              AppTheme.s5,
               0,
-              horizontalPadding,
-              screenHeight * 0.02,
+              AppTheme.s5,
+              AppTheme.s4,
             ),
             child: Column(
               children: [
                 if (_error != null) ...[
                   ErrorBanner(message: _error!),
-                  SizedBox(height: screenHeight * 0.015),
+                  SizedBox(height: AppTheme.s3),
                 ],
-                PrimaryButton(
+                AppButton(
                   label: 'Continue',
-                  icon: Icons.arrow_forward,
+                  icon: Icons.arrow_forward_rounded,
                   busy: _saving,
                   onPressed: hasText ? _submit : null,
                 ),
@@ -226,74 +225,3 @@ class _DescribeProblemScreenState extends State<DescribeProblemScreen> {
     );
   }
 }
-
-/// The big cream paragraph box, in the shape the old summary screen used.
-class _ProblemField extends StatelessWidget {
-  final TextEditingController controller;
-  final bool enabled;
-  final bool listening;
-  final VoidCallback onChanged;
-
-  const _ProblemField({
-    required this.controller,
-    required this.enabled,
-    required this.listening,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    return Container(
-      constraints: BoxConstraints(minHeight: screenHeight * 0.22),
-      decoration: BoxDecoration(
-        color: AppTheme.cardBg.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(24),
-        // Lights up while the mic is live, so the field itself shows where the
-        // words are coming from.
-        border: listening
-            ? Border.all(color: AppTheme.primary.withValues(alpha: 0.6), width: 2)
-            : null,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            offset: const Offset(0, 4),
-            blurRadius: 12,
-          ),
-        ],
-      ),
-      child: TextField(
-        controller: controller,
-        enabled: enabled,
-        maxLines: null,
-        minLines: 7,
-        onChanged: (_) => onChanged(),
-        keyboardType: TextInputType.multiline,
-        style: TextStyle(
-          fontSize: screenWidth * 0.042,
-          color: AppTheme.textOnCard,
-          height: 1.5,
-        ),
-        decoration: InputDecoration(
-          hintText: "I keep going back and forth on this because...",
-          hintStyle: TextStyle(
-            fontSize: screenWidth * 0.04,
-            color: AppTheme.textLight.withValues(alpha: 0.5),
-            height: 1.5,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding: EdgeInsets.symmetric(
-            horizontal: screenWidth * 0.05,
-            vertical: screenHeight * 0.022,
-          ),
-        ),
-      ),
-    );
-  }
-}
-

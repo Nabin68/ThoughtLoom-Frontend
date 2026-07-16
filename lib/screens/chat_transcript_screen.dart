@@ -8,25 +8,39 @@ import '../services/backend.dart';
 import '../services/chat_completion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
+import '../widgets/app_card.dart';
+import '../widgets/app_header.dart';
 import '../widgets/error_banner.dart';
+import '../widgets/rich_body.dart';
 
-/// A finished conversation, read back.
+/// A conversation, read back whole.
 ///
-/// Unlike `ContinuedChatScreen` — which shows the recommendation onward, because
+/// Unlike [ContinuedChatScreen] — which shows the recommendation onward, because
 /// it is a continuation and the scripted opening would bury the answer — this
 /// shows *everything*, in order. It is the other job: not "keep talking" but
 /// "what did I say, and what did it tell me?". The questions are part of that.
 ///
-/// Read-only. A chat reopened from history is a record; re-answering a question
-/// inside one would quietly change the conversation the advice was based on.
+/// Read-only. Re-answering a question inside a finished chat would quietly
+/// change the conversation the advice was based on.
 ///
 /// [userId] is not needed: the chat is handed in whole, and RLS scopes the
 /// message read to its owner. This is a pushed route, so it cannot reach
-/// `SessionScope` — see `HistoryScreen`.
+/// `SessionScope` — see [HistoryScreen].
 class ChatTranscriptScreen extends StatefulWidget {
   final Chat chat;
 
-  const ChatTranscriptScreen({super.key, required this.chat});
+  /// Whether opening this counts as a second attempt at closing the chat.
+  ///
+  /// True from history, where it is exactly that — see [_backfill]. False when
+  /// this is opened as a read-back from inside a live conversation, which is not
+  /// a chat anybody is finished with.
+  final bool backfill;
+
+  const ChatTranscriptScreen({
+    super.key,
+    required this.chat,
+    this.backfill = true,
+  });
 
   @override
   State<ChatTranscriptScreen> createState() => _ChatTranscriptScreenState();
@@ -39,21 +53,21 @@ class _ChatTranscriptScreenState extends State<ChatTranscriptScreen> {
   @override
   void initState() {
     super.initState();
-    _backfillTitle();
+    _backfill();
   }
 
   /// Asks the API to finish closing this chat, if it never got that far.
   ///
-  /// Titling and the memory merge run in a background task after the user
-  /// leaves a chat, and the request that starts them can simply not arrive —
-  /// the app was killed, the network was down, Render was cold. Without a
-  /// second chance, that chat is untitled and outside the user's memory
-  /// forever, silently.
+  /// Titling and the memory merge run in a background task after the user leaves
+  /// a chat, and the request that starts them can simply not arrive — the app was
+  /// killed, the network was down, Render was cold. Without a second chance, that
+  /// chat is untitled and outside the user's memory forever, silently.
   ///
   /// Opening one is the natural retry: the user is looking at the chat, the API
   /// skips whichever half already ran, and the work is bounded by their own
   /// tapping rather than by a loop.
-  void _backfillTitle() {
+  void _backfill() {
+    if (!widget.backfill) return;
     final chat = widget.chat;
     if (chat.title != null || chat.status != ChatStatus.completed) return;
     // Not awaited and not shown: the title lands on the next visit to history.
@@ -64,48 +78,14 @@ class _ChatTranscriptScreenState extends State<ChatTranscriptScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return AppBackground(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              screenWidth * 0.06,
-              screenHeight * 0.02,
-              screenWidth * 0.06,
-              screenHeight * 0.015,
-            ),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: EdgeInsets.only(right: screenWidth * 0.03),
-                    child: Icon(
-                      Icons.arrow_back,
-                      size: screenWidth * 0.055,
-                      color: AppTheme.textLight,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    widget.chat.title ?? widget.chat.category.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: screenWidth * 0.038,
-                      color: AppTheme.textLight,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          AppHeader(
+            title: widget.chat.title ?? widget.chat.category.label,
+            subtitle: 'The whole conversation',
+            onBack: () => Navigator.pop(context),
           ),
           Expanded(
             child: FutureBuilder<List<Message>>(
@@ -115,14 +95,13 @@ class _ChatTranscriptScreenState extends State<ChatTranscriptScreen> {
                   return const Center(
                     child: CircularProgressIndicator(
                       strokeWidth: 3,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
                     ),
                   );
                 }
                 if (snapshot.hasError) {
                   return Padding(
-                    padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.06),
+                    padding: EdgeInsets.symmetric(horizontal: AppTheme.s5),
                     child: ErrorBanner(message: snapshot.error.toString()),
                   );
                 }
@@ -133,10 +112,10 @@ class _ChatTranscriptScreenState extends State<ChatTranscriptScreen> {
                 return ListView.builder(
                   physics: const BouncingScrollPhysics(),
                   padding: EdgeInsets.fromLTRB(
-                    screenWidth * 0.06,
-                    0,
-                    screenWidth * 0.06,
-                    screenHeight * 0.03,
+                    AppTheme.s5,
+                    AppTheme.s3,
+                    AppTheme.s5,
+                    AppTheme.s8,
                   ),
                   itemCount: messages.length,
                   itemBuilder: (context, i) => _Turn(message: messages[i]),
@@ -157,24 +136,13 @@ class _NothingInIt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Center(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          screenWidth * 0.1,
-          0,
-          screenWidth * 0.1,
-          screenWidth * 0.2,
-        ),
+        padding: EdgeInsets.all(AppTheme.s8),
         child: Text(
           'This one never got started.',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: screenWidth * 0.042,
-            color: AppTheme.textLight,
-            height: 1.4,
-          ),
+          style: AppTheme.secondary(context),
         ),
       ),
     );
@@ -184,8 +152,7 @@ class _NothingInIt extends StatelessWidget {
 /// One turn, rendered by what kind of turn it was.
 ///
 /// A question and its answer are one row in the database, so they are one widget
-/// here: the question in the quiet type a label gets, the answer in the card
-/// under it.
+/// here: the question in the quiet type a label gets, the answer under it.
 class _Turn extends StatelessWidget {
   final Message message;
 
@@ -203,7 +170,13 @@ class _Turn extends StatelessWidget {
         // was in the middle of asking when it was abandoned.
         return _QuestionAndAnswer(
           question: question,
-          answer: answer.isEmpty ? '(skipped)' : answer,
+          answer: answer,
+          // Written by the flow for a multi-select turn, so the transcript can
+          // show three ticked answers as three answers rather than as one
+          // sentence with semicolons in it.
+          selected: (message.metadata['selected'] as List? ?? const [])
+              .whereType<String>()
+              .toList(),
         );
       case MessageType.freeText:
         if (answer.isEmpty) return const SizedBox.shrink();
@@ -221,38 +194,73 @@ class _Turn extends StatelessWidget {
 class _QuestionAndAnswer extends StatelessWidget {
   final String question;
   final String answer;
+  final List<String> selected;
 
-  const _QuestionAndAnswer({required this.question, required this.answer});
+  const _QuestionAndAnswer({
+    required this.question,
+    required this.answer,
+    this.selected = const [],
+  });
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    // More than one is what makes it worth listing; a single-select answer
+    // stored with the same key is just a sentence.
+    final asList = selected.length > 1;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: screenWidth * 0.045),
+      padding: EdgeInsets.only(bottom: AppTheme.s5),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (question.isNotEmpty) ...[
+            Text(question, style: AppTheme.meta(context)),
+            SizedBox(height: AppTheme.s2),
+          ],
+          if (answer.isEmpty)
             Text(
-              question,
-              style: TextStyle(
-                fontSize: screenWidth * 0.034,
-                color: AppTheme.textLight,
-                height: 1.4,
+              '(skipped)',
+              style: AppTheme.body(context).copyWith(
+                color: AppTheme.textFaint,
+                fontStyle: FontStyle.italic,
+              ),
+            )
+          else if (asList)
+            for (final one in selected)
+              Padding(
+                padding: EdgeInsets.only(bottom: AppTheme.s1 + 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Icon(
+                        Icons.check_rounded,
+                        size: 14,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                    SizedBox(width: AppTheme.s2),
+                    Expanded(
+                      child: Text(
+                        one,
+                        style: AppTheme.body(context).copyWith(
+                          color: AppTheme.textDark,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+          else
+            Text(
+              answer,
+              style: AppTheme.body(context).copyWith(
+                color: AppTheme.textDark,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            SizedBox(height: screenWidth * 0.015),
-          ],
-          Text(
-            answer,
-            style: TextStyle(
-              fontSize: screenWidth * 0.04,
-              color: AppTheme.textDark,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
-          ),
         ],
       ),
     );
@@ -267,23 +275,18 @@ class _Said extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Container(
       width: double.infinity,
-      margin: EdgeInsets.only(bottom: screenWidth * 0.05),
-      padding: EdgeInsets.all(screenWidth * 0.045),
+      margin: EdgeInsets.only(bottom: AppTheme.s5),
+      padding: EdgeInsets.all(AppTheme.s4),
       decoration: BoxDecoration(
         color: AppTheme.primary,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppTheme.rMd),
+        boxShadow: AppTheme.shadowSoft,
       ),
       child: Text(
         text,
-        style: TextStyle(
-          fontSize: screenWidth * 0.038,
-          color: Colors.white,
-          height: 1.5,
-        ),
+        style: AppTheme.body(context).copyWith(color: Colors.white),
       ),
     );
   }
@@ -296,23 +299,19 @@ class _Replied extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Container(
       width: double.infinity,
-      margin: EdgeInsets.only(bottom: screenWidth * 0.05),
-      padding: EdgeInsets.all(screenWidth * 0.045),
+      margin: EdgeInsets.only(bottom: AppTheme.s5),
+      padding: EdgeInsets.all(AppTheme.s4),
       decoration: BoxDecoration(
-        color: AppTheme.cardBg.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(20),
+        color: AppTheme.cardBg,
+        borderRadius: BorderRadius.circular(AppTheme.rMd),
+        border: Border.all(color: AppTheme.border),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: screenWidth * 0.038,
-          color: AppTheme.textOnCard,
-          height: 1.5,
-        ),
+      child: RichBody(
+        markdown: text,
+        baseStyle: AppTheme.body(context),
+        allowCallouts: false,
       ),
     );
   }
@@ -321,9 +320,9 @@ class _Replied extends StatelessWidget {
 /// The advice, given the weight it had on the day.
 ///
 /// It is the one turn someone comes back to read, so it is the one turn that
-/// gets a heading and its steps — a transcript where the answer looked like
-/// every other bubble would make them scroll for the thing they opened this to
-/// find.
+/// gets a heading, its headline, and its steps — a transcript where the answer
+/// looked like every other bubble would make them scroll for the thing they
+/// opened this to find.
 class _Advice extends StatelessWidget {
   final String text;
   final Map<String, dynamic> metadata;
@@ -333,82 +332,58 @@ class _Advice extends StatelessWidget {
   List<String> get _steps =>
       (metadata['next_steps'] as List? ?? const []).whereType<String>().toList();
 
+  String get _headline => (metadata['headline'] as String? ?? '').trim();
+
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
     final steps = _steps;
+    final headline = _headline;
 
-    return Container(
-      width: double.infinity,
-      margin: EdgeInsets.only(bottom: screenWidth * 0.05),
-      padding: EdgeInsets.all(screenWidth * 0.05),
-      decoration: BoxDecoration(
-        color: AppTheme.cardBg.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            offset: const Offset(0, 4),
-            blurRadius: 12,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'What I said',
-            style: TextStyle(
-              fontSize: screenWidth * 0.032,
-              color: AppTheme.textLight,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.4,
-            ),
-          ),
-          SizedBox(height: screenWidth * 0.03),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: screenWidth * 0.04,
-              color: AppTheme.textOnCard,
-              height: 1.6,
-            ),
-          ),
-          if (steps.isNotEmpty) ...[
-            SizedBox(height: screenWidth * 0.045),
-            for (final step in steps)
-              Padding(
-                padding: EdgeInsets.only(bottom: screenWidth * 0.02),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.only(top: screenWidth * 0.015),
-                      child: Container(
-                        width: screenWidth * 0.015,
-                        height: screenWidth * 0.015,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.primary,
-                          shape: BoxShape.circle,
+    return Padding(
+      padding: EdgeInsets.only(bottom: AppTheme.s5),
+      child: AppCard(
+        highlighted: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SectionLabel('What I said', icon: Icons.bolt_rounded),
+            SizedBox(height: AppTheme.s3),
+            if (headline.isNotEmpty) ...[
+              Text(headline, style: AppTheme.title(context)),
+              SizedBox(height: AppTheme.s3),
+            ],
+            RichBody(markdown: text, baseStyle: AppTheme.body(context)),
+            if (steps.isNotEmpty) ...[
+              SizedBox(height: AppTheme.s4),
+              const SectionLabel('Where to start'),
+              SizedBox(height: AppTheme.s3),
+              for (final step in steps)
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppTheme.s2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 7),
+                        child: Container(
+                          width: 5,
+                          height: 5,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primary,
+                            shape: BoxShape.circle,
+                          ),
                         ),
                       ),
-                    ),
-                    SizedBox(width: screenWidth * 0.03),
-                    Expanded(
-                      child: Text(
-                        step,
-                        style: TextStyle(
-                          fontSize: screenWidth * 0.036,
-                          color: AppTheme.textOnCard,
-                          height: 1.45,
-                        ),
+                      SizedBox(width: AppTheme.s3),
+                      Expanded(
+                        child: Text(step, style: AppTheme.body(context)),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

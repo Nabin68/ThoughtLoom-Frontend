@@ -2,13 +2,14 @@
 
 import 'package:flutter/material.dart';
 
+import '../data/onboarding_questions.dart';
 import '../models/auth_user.dart';
 import '../models/user_profile.dart';
 import '../services/backend.dart';
 import '../services/session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
-import '../widgets/primary_button.dart';
+import '../widgets/app_button.dart';
 import 'dashboard_screen.dart';
 import 'landing_screen.dart';
 import 'onboarding_screen.dart';
@@ -102,19 +103,33 @@ class _SignedInState extends State<_SignedIn> {
           user: widget.user,
           profile: profile,
           reload: _reload,
-          // The single rule for what a signed-in user sees. A first
-          // registration arrives with the flag false and gets the questions; a
-          // returning user arrives with it true and never sees them again.
-          // OnboardingScreen resumes from the first unanswered question, so an
-          // interrupted run picks up rather than restarts.
-          child: profile.onboardingCompleted
-              ? const DashboardScreen()
-              : const OnboardingScreen(),
+          child: _needsOnboarding(profile)
+              ? const OnboardingScreen()
+              : const DashboardScreen(),
         );
       },
     );
   }
 }
+
+/// The single rule for what a signed-in user sees.
+///
+/// It used to be `profile.onboardingCompleted` alone, and the flag short-circuited
+/// before the question list was ever consulted — so adding a question to
+/// [onboardingQuestions] reached new users and nobody else, forever. Everyone
+/// who had already signed up simply never got asked, and the feature that needed
+/// the answer had to cope with it being permanently absent. The build notes said
+/// as much: "a migration would have to clear the flag."
+///
+/// This is that migration, without the migration. [firstUnansweredIndex] tests
+/// for a key's *presence*, and a skipped question is stored as an explicit null —
+/// so a returning user whose profile is missing only the two questions added
+/// after they signed up is asked exactly those two and then handed straight back
+/// to the dashboard. Someone who has answered everything never sees the screen,
+/// which is the rule that mattered all along.
+bool _needsOnboarding(UserProfile profile) =>
+    !profile.onboardingCompleted ||
+    firstUnansweredIndex(profile.onboardingAnswers) < onboardingQuestions.length;
 
 class _Splash extends StatelessWidget {
   const _Splash();
@@ -157,52 +172,34 @@ class _ProfileError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-
     return AppBackground(
       child: Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.08),
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: EdgeInsets.symmetric(horizontal: AppTheme.s6),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
                 "We couldn't load your account",
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.06,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textDark,
-                  letterSpacing: -0.5,
-                ),
+                style: AppTheme.title(context),
               ),
-              SizedBox(height: screenHeight * 0.015),
+              SizedBox(height: AppTheme.s3),
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.038,
-                  color: AppTheme.textLight,
-                  height: 1.4,
-                ),
+                style: AppTheme.secondary(context),
               ),
-              SizedBox(height: screenHeight * 0.04),
-              PrimaryButton(label: 'Try again', onPressed: onRetry),
-              SizedBox(height: screenHeight * 0.015),
-              TextButton(
+              SizedBox(height: AppTheme.s6),
+              AppButton(label: 'Try again', onPressed: onRetry),
+              SizedBox(height: AppTheme.s2),
+              AppButton.quiet(
+                label: 'Sign out',
                 // Sign-out is the escape hatch from a profile that will not
                 // load; if it throws too there is nothing useful left to say, so
                 // swallow rather than let it reach the zone unhandled.
                 onPressed: () => Backend.auth.signOut().catchError((_) {}),
-                child: Text(
-                  'Sign out',
-                  style: TextStyle(
-                    fontSize: screenWidth * 0.038,
-                    color: AppTheme.textLight,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
               ),
             ],
           ),

@@ -5,30 +5,32 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/chat.dart';
+import '../models/intake_question.dart';
 import '../models/user_profile.dart';
 import '../services/ai_service.dart';
 import '../services/backend.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
-import '../widgets/auth_text_field.dart';
+import '../widgets/app_button.dart';
+import '../widgets/app_header.dart';
+import '../widgets/app_text_field.dart';
 import '../widgets/dictation.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/option_tile.dart';
-import '../widgets/primary_button.dart';
 import 'recommendation_screen.dart';
 
 /// The generated questions.
 ///
 /// Deliberately indistinguishable from `IntakeFlowScreen`: same header, same
-/// cream option rows, same button. To the user this is one conversation that
-/// happens to have got more specific — not the moment "the AI mode" starts. The
-/// only tell is the wording of the questions, which is the point.
+/// option rows, same button. To the user this is one conversation that happens
+/// to have got more specific — not the moment "the AI mode" starts. The only
+/// tell is the wording of the questions, which is the point.
 ///
 /// ### Where the writes happen
 ///
 /// Nowhere in here. The API writes each question when it generates it and fills
-/// in the answer when this screen sends it, both with the service-role key.
-/// This screen holds a `message_id` and posts an answer against it — it has no
+/// in the answer when this screen sends it, both with the service-role key. This
+/// screen holds a `message_id` and posts an answer against it — it has no
 /// [DataService] calls at all, which is why an answer and the next question are
 /// one round trip that cannot half-succeed.
 ///
@@ -62,9 +64,10 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
   String? _error;
   bool _errorRetryable = true;
 
-  /// The tapped option, or null. Mutually exclusive with the free-text box:
-  /// choosing an option closes it, opening it clears the choice.
-  String? _choice;
+  /// The ticked options. A set for both kinds — the model decides per question
+  /// whether more than one may be chosen, and a single-choice question is just a
+  /// cap of one.
+  final Set<String> _choices = {};
 
   /// Whether the free-text escape hatch is open. Always offered, whatever the
   /// model generated — the options are its guesses, and being unable to say
@@ -73,7 +76,7 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
 
   bool get _answered => _writingOwnAnswer
       ? _textController.text.trim().isNotEmpty
-      : _choice != null;
+      : _choices.isNotEmpty;
 
   @override
   void initState() {
@@ -96,7 +99,11 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
   }
 
   /// Asks for the next question. [answer] is null on the first call.
-  Future<void> _load({String? answer, String? answerTo}) async {
+  Future<void> _load({
+    String? answer,
+    String? answerTo,
+    List<String>? selections,
+  }) async {
     if (!Backend.usingSupabase) {
       setState(() {
         _loading = false;
@@ -117,6 +124,7 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
         chatId: widget.chat.id,
         answer: answer,
         answerToMessageId: answerTo,
+        selections: selections,
       );
       if (!mounted) return;
 
@@ -133,7 +141,7 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
       setState(() {
         _turn = turn;
         _loading = false;
-        _choice = null;
+        _choices.clear();
         _writingOwnAnswer = false;
         _textController.clear();
       });
@@ -151,61 +159,82 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
   /// Retries whatever failed.
   ///
   /// Safe to hit repeatedly. If the answer got through and only the reply was
-  /// lost, the API sees the question already answered and moves on; if a
-  /// question was already generated and we never showed it, it hands back that
-  /// same one rather than inventing a second.
+  /// lost, the API sees the question already answered and moves on; if a question
+  /// was already generated and we never showed it, it hands back that same one
+  /// rather than inventing a second.
   Future<void> _retry() async {
-    if (_pendingAnswer != null && _turn?.messageId != null) {
-      await _load(answer: _pendingAnswer, answerTo: _turn!.messageId);
+    if (_pending != null && _turn?.messageId != null) {
+      await _load(
+        answer: _pending,
+        answerTo: _turn!.messageId,
+        selections: _pendingSelections,
+      );
     } else {
       await _load();
     }
   }
 
-  String? _pendingAnswer;
+  String? _pending;
+  List<String>? _pendingSelections;
+
+  void _select(String option) {
+    setState(() {
+      _writingOwnAnswer = false;
+      _textController.clear();
+      if (_turn?.multi ?? false) {
+        _choices.contains(option)
+            ? _choices.remove(option)
+            : _choices.add(option);
+      } else {
+        _choices
+          ..clear()
+          ..add(option);
+      }
+    });
+  }
 
   Future<void> _submit() async {
     if (!_answered || _loading) return;
     await _dictation.stop();
     if (!mounted) return;
 
-    final answer =
-        _writingOwnAnswer ? _textController.text.trim() : _choice!;
-    _pendingAnswer = answer;
-    await _load(answer: answer, answerTo: _turn?.messageId);
-    if (mounted && _error == null) _pendingAnswer = null;
+    final turn = _turn;
+    final List<String>? selections;
+    final String answer;
+
+    if (_writingOwnAnswer) {
+      answer = _textController.text.trim();
+      selections = null;
+    } else {
+      // Option order, not tap order — see IntakeFlowScreen. The model wrote the
+      // list; it should read the answer back in the order it wrote it.
+      final chosen =
+          (turn?.options ?? const <String>[]).where(_choices.contains).toList();
+      answer = joinSelections(chosen);
+      selections = chosen.length > 1 ? chosen : null;
+    }
+
+    _pending = answer;
+    _pendingSelections = selections;
+    await _load(
+      answer: answer,
+      answerTo: turn?.messageId,
+      selections: selections,
+    );
+    if (mounted && _error == null) {
+      _pending = null;
+      _pendingSelections = null;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final horizontalPadding = screenWidth * 0.06;
-
     return AppBackground(
       child: Column(
         children: [
-          Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: horizontalPadding,
-              vertical: screenHeight * 0.02,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${widget.chat.category.label} · A few more questions',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: screenWidth * 0.038,
-                      color: AppTheme.textLight,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          AppHeader(
+            title: widget.chat.category.label,
+            subtitle: 'A few more questions',
           ),
           Expanded(
             child: _error != null
@@ -220,14 +249,14 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
           if (_error == null && !_loading && _turn != null)
             Padding(
               padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
+                AppTheme.s5,
                 0,
-                horizontalPadding,
-                screenHeight * 0.02,
+                AppTheme.s5,
+                AppTheme.s4,
               ),
-              child: PrimaryButton(
+              child: AppButton(
                 label: 'Continue',
-                icon: Icons.arrow_forward,
+                icon: Icons.arrow_forward_rounded,
                 onPressed: _answered ? _submit : null,
               ),
             ),
@@ -237,74 +266,77 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
   }
 
   Widget _buildQuestion() {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
     final turn = _turn!;
+    final multi = turn.multi;
 
     return SingleChildScrollView(
       controller: _scrollController,
       physics: const BouncingScrollPhysics(),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.06),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(height: screenHeight * 0.02),
+      padding: EdgeInsets.fromLTRB(
+        AppTheme.s5,
+        AppTheme.s4,
+        AppTheme.s5,
+        AppTheme.s6,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(turn.question ?? '', style: AppTheme.title(context)),
+          if (multi) ...[
+            SizedBox(height: AppTheme.s2),
             Text(
-              turn.question ?? '',
-              style: TextStyle(
-                fontSize: screenWidth * 0.065,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textDark,
-                height: 1.3,
-                letterSpacing: -0.5,
-              ),
+              'Pick everything that is true.',
+              style: AppTheme.secondary(context),
             ),
-            SizedBox(height: screenHeight * 0.035),
-            for (final option in turn.options)
-              OptionTile(
-                label: option,
-                selected: !_writingOwnAnswer && _choice == option,
-                onTap: () => setState(() {
-                  _choice = option;
-                  _writingOwnAnswer = false;
-                  _textController.clear();
-                }),
-              ),
-
-            // Always present, whatever the model generated.
-            OptionTile(
-              label: 'Something else — let me explain',
-              selected: _writingOwnAnswer,
-              onTap: () => setState(() {
-                _writingOwnAnswer = true;
-                _choice = null;
-              }),
-            ),
-
-            if (_writingOwnAnswer) ...[
-              SizedBox(height: screenHeight * 0.012),
-              AuthTextField(
-                controller: _textController,
-                hintText: 'In your own words...',
-                icon: Icons.edit_note_outlined,
-                maxLines: 3,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                onChanged: (_) => setState(() {}),
-              ),
-              if (_dictation.available) ...[
-                SizedBox(height: screenHeight * 0.015),
-                DictationButton(
-                  controller: _dictation,
-                  onPressed: _dictation.toggle,
-                  label: 'Answer out loud',
-                ),
-              ],
-            ],
-            SizedBox(height: screenHeight * 0.03),
           ],
-        ),
+          SizedBox(height: AppTheme.s5),
+          for (final option in turn.options)
+            OptionTile(
+              label: option,
+              selected: !_writingOwnAnswer && _choices.contains(option),
+              mode: multi ? ChoiceMode.multi : ChoiceMode.single,
+              onTap: () => _select(option),
+            ),
+
+          // Always present, whatever the model generated.
+          OptionTile(
+            label: 'Something else — let me explain',
+            selected: _writingOwnAnswer,
+            onTap: () => setState(() {
+              _writingOwnAnswer = true;
+              _choices.clear();
+            }),
+          ),
+
+          if (_writingOwnAnswer) ...[
+            SizedBox(height: AppTheme.s2),
+            AppTextField(
+              controller: _textController,
+              hintText: 'In your own words...',
+              icon: Icons.edit_note_outlined,
+              maxLines: 4,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              listening: _dictation.listening,
+              onChanged: (_) => setState(() {}),
+              onTap: _dictation.stop,
+            ),
+            if (_dictation.available) ...[
+              SizedBox(height: AppTheme.s3),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: DictationButton(
+                  controller: _dictation,
+                  label: 'Answer out loud',
+                  onPressed: () {
+                    FocusScope.of(context).unfocus();
+                    _dictation.toggle();
+                  },
+                ),
+              ),
+            ],
+          ],
+        ],
       ),
     );
   }
@@ -348,31 +380,25 @@ class _ThinkingState extends State<_Thinking> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: screenWidth * 0.09,
-            height: screenWidth * 0.09,
-            child: const CircularProgressIndicator(
+          const SizedBox(
+            width: 34,
+            height: 34,
+            child: CircularProgressIndicator(
               strokeWidth: 3,
               valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
             ),
           ),
-          SizedBox(height: screenWidth * 0.06),
+          SizedBox(height: AppTheme.s5),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 400),
             child: Text(
               _lines[_index],
               key: ValueKey(_index),
-              style: TextStyle(
-                fontSize: screenWidth * 0.04,
-                color: AppTheme.textLight,
-                height: 1.4,
-              ),
+              style: AppTheme.secondary(context),
             ),
           ),
         ],
@@ -390,47 +416,30 @@ class _Failure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Center(
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.06),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ErrorBanner(message: message),
-              SizedBox(height: screenHeight * 0.025),
-              // Reassurance, because the honest fear here is that a failure ate
-              // the last ten minutes of answering questions. It did not.
-              Text(
-                'Nothing you have said is lost.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: screenWidth * 0.036,
-                  color: AppTheme.textLight,
-                ),
-              ),
-              SizedBox(height: screenHeight * 0.025),
-              if (onRetry != null)
-                PrimaryButton(label: 'Try again', onPressed: onRetry),
-              SizedBox(height: screenHeight * 0.012),
-              TextButton(
-                onPressed: () =>
-                    Navigator.popUntil(context, (route) => route.isFirst),
-                child: Text(
-                  'Back to start',
-                  style: TextStyle(
-                    fontSize: screenWidth * 0.038,
-                    color: AppTheme.textLight,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
+        padding: EdgeInsets.symmetric(horizontal: AppTheme.s5),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ErrorBanner(message: message),
+            SizedBox(height: AppTheme.s5),
+            // Reassurance, because the honest fear here is that a failure ate the
+            // last ten minutes of answering questions. It did not.
+            Text(
+              'Nothing you have said is lost.',
+              textAlign: TextAlign.center,
+              style: AppTheme.secondary(context),
+            ),
+            SizedBox(height: AppTheme.s5),
+            if (onRetry != null) AppButton(label: 'Try again', onPressed: onRetry),
+            SizedBox(height: AppTheme.s2),
+            AppButton.quiet(
+              label: 'Back to start',
+              onPressed: () => Navigator.popUntil(context, (r) => r.isFirst),
+            ),
+          ],
         ),
       ),
     );
