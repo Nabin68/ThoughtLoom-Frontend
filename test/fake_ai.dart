@@ -27,6 +27,7 @@ class FakeAi implements AiService {
   final List<List<String>?> selectionsSent = [];
 
   int followUpCalls = 0;
+  int warmUpCalls = 0;
 
   /// Chats this was asked to close. The screens fire this without awaiting it,
   /// so a test that reads it has to pump first.
@@ -83,5 +84,10 @@ class FakeAi implements AiService {
   Future<void> completeChat({required String chatId}) async {
     completed.add(chatId);
     _maybeFail();
+  }
+
+  @override
+  Future<void> warmUp() async {
+    warmUpCalls++;
   }
 }

@@ -8,7 +8,7 @@ class ApiConfig {
     defaultValue: 'https://thoughtloom-backend-6wmm.onrender.com',
   );
 
-  static Uri get analyzeUrl => Uri.parse('$baseUrl/api/analyze');
+  static Uri get healthUrl => Uri.parse('$baseUrl/health');
 
   static Uri get adaptiveQuestionUrl => Uri.parse('$baseUrl/api/adaptive-question');
   static Uri get recommendationUrl => Uri.parse('$baseUrl/api/recommendation');

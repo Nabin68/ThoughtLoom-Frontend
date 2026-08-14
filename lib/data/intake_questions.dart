@@ -210,27 +210,40 @@ List<String> _partnerOptions(UserProfile profile) {
     Gender.nonBinary || Gender.unspecified => 'My partner',
   };
 
+  final ex = switch (gender) {
+    Gender.man => 'My ex-girlfriend',
+    Gender.woman => 'My ex-boyfriend',
+    Gender.nonBinary || Gender.unspecified => 'My ex',
+  };
+
+  // Onboarding's relationship status decides the order, never what is fully
+  // off the table. It used to exclude "ex" whenever the status was not
+  // literally "ended", and exclude any partner term at all for "none" — so
+  // someone who is currently single but wants to talk about an ex, or is
+  // between relationships and not ready to say "ended", had no way to say so.
+  // A profile saying "single" still has exes; one saying "committed" still has
+  // a chat about somebody before that.
   return switch (status) {
-    PartnerStatus.committed when married => [spouse],
+    PartnerStatus.committed when married => [spouse, ex],
     PartnerStatus.committed || PartnerStatus.dating => [
         theirs,
         if (alternative != null) alternative,
+        ex,
       ],
-    PartnerStatus.ended => [
-        switch (gender) {
-          Gender.man => 'My ex-girlfriend',
-          Gender.woman => 'My ex-boyfriend',
-          Gender.nonBinary || Gender.unspecified => 'My ex',
-        },
+    PartnerStatus.ended => [ex, 'Someone I am seeing', 'Someone I want to be with'],
+    PartnerStatus.none => [
         'Someone I am seeing',
+        ex,
+        'Someone I want to be with',
       ],
-    PartnerStatus.none => ['Someone I am seeing', 'Someone I want to be with'],
     // Declined the optional onboarding question, or a profile from before it
-    // existed. No assumption, and no second attempt at asking — declining once
-    // means declined.
+    // existed. No assumption which of the above applies, so this is the one
+    // case that has to cover all of it rather than guess.
     PartnerStatus.unclear || PartnerStatus.unknown => [
         theirs,
         if (alternative != null) alternative,
+        ex,
+        'Someone I am seeing',
       ],
   };
 }
@@ -326,7 +339,6 @@ List<IntakeQuestion> _relationship(
           'Whether to go along with what ${who.subject} ${who.verb("want")}',
           'Whether I am being unreasonable',
         ],
-        'Something else',
       ],
     ),
 
@@ -403,7 +415,6 @@ List<IntakeQuestion> _education(UserProfile profile) {
             'Whether to study further at all',
             'Which entrance exams to aim for',
             'Whether to take a year out first',
-            'Something else',
           ],
         ),
       EducationStage.midDegree => const IntakeQuestion(
@@ -415,7 +426,6 @@ List<IntakeQuestion> _education(UserProfile profile) {
             'What to do once it finishes',
             'Whether to add something alongside it',
             'Whether to take a break from it',
-            'Something else',
           ],
         ),
       EducationStage.graduated => const IntakeQuestion(
@@ -427,7 +437,6 @@ List<IntakeQuestion> _education(UserProfile profile) {
             'Whether to retrain in a different field',
             'Whether the cost and time are worth it',
             'Whether to go abroad for it',
-            'Something else',
           ],
         ),
       EducationStage.vocational ||
@@ -442,7 +451,6 @@ List<IntakeQuestion> _education(UserProfile profile) {
             'Whether to retrain in a different field',
             'Whether the cost and time are worth it',
             'Whether to keep learning on my own',
-            'Something else',
           ],
         ),
     },
@@ -544,7 +552,6 @@ List<IntakeQuestion> _financial(UserProfile profile) {
         'Making what I have stretch',
         'Money I would be giving someone else',
         'Money someone owes me',
-        'Something else',
       ],
     ),
 
@@ -659,7 +666,6 @@ List<IntakeQuestion> _other(UserProfile profile) => const [
           'A habit I want to change',
           'Something creative',
           'How I spend my time',
-          'Something else entirely',
         ],
       ),
 

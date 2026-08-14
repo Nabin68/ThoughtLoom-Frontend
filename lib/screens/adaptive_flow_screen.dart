@@ -177,6 +177,18 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
   String? _pending;
   List<String>? _pendingSelections;
 
+  /// Closes the gap `await _dictation.stop()` opens below: the Continue button
+  /// only leaves the tree once [_loading] flips true, deep inside [_load], and
+  /// that does not happen until after this awaits. A fast double-tap fires
+  /// [_submit] twice before either call has disabled anything, and two
+  /// near-simultaneous answers to the same question is exactly what the
+  /// server's retry-idempotency in `next_question` reads as "this looks like a
+  /// retry" — handing the pending question back instead of moving on, which is
+  /// what a repeat looks like from here. Set synchronously, before the first
+  /// `await`, so the second tap has something to check before either call has
+  /// had a chance to yield.
+  bool _submitting = false;
+
   void _select(String option) {
     setState(() {
       _writingOwnAnswer = false;
@@ -194,36 +206,42 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_answered || _loading) return;
-    await _dictation.stop();
-    if (!mounted) return;
+    if (!_answered || _loading || _submitting) return;
+    _submitting = true;
+    try {
+      await _dictation.stop();
+      if (!mounted) return;
 
-    final turn = _turn;
-    final List<String>? selections;
-    final String answer;
+      final turn = _turn;
+      final List<String>? selections;
+      final String answer;
 
-    if (_writingOwnAnswer) {
-      answer = _textController.text.trim();
-      selections = null;
-    } else {
-      // Option order, not tap order — see IntakeFlowScreen. The model wrote the
-      // list; it should read the answer back in the order it wrote it.
-      final chosen =
-          (turn?.options ?? const <String>[]).where(_choices.contains).toList();
-      answer = joinSelections(chosen);
-      selections = chosen.length > 1 ? chosen : null;
-    }
+      if (_writingOwnAnswer) {
+        answer = _textController.text.trim();
+        selections = null;
+      } else {
+        // Option order, not tap order — see IntakeFlowScreen. The model wrote
+        // the list; it should read the answer back in the order it wrote it.
+        final chosen = (turn?.options ?? const <String>[])
+            .where(_choices.contains)
+            .toList();
+        answer = joinSelections(chosen);
+        selections = chosen.length > 1 ? chosen : null;
+      }
 
-    _pending = answer;
-    _pendingSelections = selections;
-    await _load(
-      answer: answer,
-      answerTo: turn?.messageId,
-      selections: selections,
-    );
-    if (mounted && _error == null) {
-      _pending = null;
-      _pendingSelections = null;
+      _pending = answer;
+      _pendingSelections = selections;
+      await _load(
+        answer: answer,
+        answerTo: turn?.messageId,
+        selections: selections,
+      );
+      if (mounted && _error == null) {
+        _pending = null;
+        _pendingSelections = null;
+      }
+    } finally {
+      _submitting = false;
     }
   }
 

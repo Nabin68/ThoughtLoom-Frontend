@@ -1,5 +1,6 @@
 //supabase_auth_service.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../models/auth_user.dart';
@@ -9,6 +10,29 @@ class SupabaseAuthService extends AuthService {
   final sb.SupabaseClient _client;
 
   SupabaseAuthService(this._client);
+
+  /// Every public method funnels through this so nothing raw — a
+  /// [SocketException] from a dead DNS entry, a timeout, whatever the HTTP
+  /// client throws — ever reaches a screen. A screen only ever catches
+  /// [AuthFailure], so anything that isn't already one has to become one here,
+  /// not "Something went wrong" hardcoded at every call site.
+  Future<T> _guard<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } on sb.AuthException catch (e) {
+      throw AuthFailure(_readable(e));
+    } on AuthFailure {
+      rethrow;
+    } catch (e) {
+      // The user-facing guess is a network problem, which is what this almost
+      // always is — a dead Supabase project, no signal, DNS gone. Log the real
+      // one so it is not lost.
+      debugPrint('ThoughtLoom: auth request failed — $e');
+      throw const AuthFailure(
+        "Couldn't reach the server. Check your connection and try again.",
+      );
+    }
+  }
 
   AuthUser? _toAuthUser(sb.User? user) =>
       user == null ? null : AuthUser(id: user.id, email: user.email ?? '');
@@ -54,57 +78,45 @@ class SupabaseAuthService extends AuthService {
     required String email,
     required String password,
     String? displayName,
-  }) async {
-    final name = displayName?.trim();
-    try {
-      final res = await _client.auth.signUp(
-        email: email.trim(),
-        password: password,
-        // Read back by the handle_new_user trigger to seed user_profiles.
-        data: (name == null || name.isEmpty) ? null : {'display_name': name},
-      );
+  }) =>
+      _guard(() async {
+        final name = displayName?.trim();
+        final res = await _client.auth.signUp(
+          email: email.trim(),
+          password: password,
+          // Read back by the handle_new_user trigger to seed user_profiles.
+          data: (name == null || name.isEmpty) ? null : {'display_name': name},
+        );
 
-      final user = _toAuthUser(res.user);
-      if (user == null) {
-        throw const AuthFailure('Could not create your account. Please try again.');
-      }
-      return SignUpResult(
-        user: user,
-        needsEmailConfirmation: res.session == null,
-      );
-    } on sb.AuthException catch (e) {
-      throw AuthFailure(_readable(e));
-    }
-  }
+        final user = _toAuthUser(res.user);
+        if (user == null) {
+          throw const AuthFailure('Could not create your account. Please try again.');
+        }
+        return SignUpResult(
+          user: user,
+          needsEmailConfirmation: res.session == null,
+        );
+      });
 
   @override
   Future<AuthUser> signIn({
     required String email,
     required String password,
-  }) async {
-    try {
-      final res = await _client.auth.signInWithPassword(
-        email: email.trim(),
-        password: password,
-      );
-      final user = _toAuthUser(res.user);
-      if (user == null) {
-        throw const AuthFailure('Could not sign you in. Please try again.');
-      }
-      return user;
-    } on sb.AuthException catch (e) {
-      throw AuthFailure(_readable(e));
-    }
-  }
+  }) =>
+      _guard(() async {
+        final res = await _client.auth.signInWithPassword(
+          email: email.trim(),
+          password: password,
+        );
+        final user = _toAuthUser(res.user);
+        if (user == null) {
+          throw const AuthFailure('Could not sign you in. Please try again.');
+        }
+        return user;
+      });
 
   @override
-  Future<void> signOut() async {
-    try {
-      await _client.auth.signOut();
-    } on sb.AuthException catch (e) {
-      throw AuthFailure(_readable(e));
-    }
-  }
+  Future<void> signOut() => _guard(() => _client.auth.signOut());
 
   /// Supabase phrases errors for developers. These are the ones a user can
   /// actually act on; anything else passes through as-is.

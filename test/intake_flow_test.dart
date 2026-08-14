@@ -392,6 +392,35 @@ void main() {
           tester.widget<AppButton>(find.widgetWithText(AppButton, 'Next'));
       expect(button.onPressed, isNull);
     });
+
+    testWidgets(
+        'a choice question with nothing that fits offers a way to say so',
+        (tester) async {
+      final userId = await signInWithProfile(tester);
+      await tapCategory(tester, ChatCategory.relationship);
+
+      // rel_who has no hardcoded escape at all — the exact gap this exists
+      // to close. Whatever the options, "Something else" is always there too.
+      expect(find.text('Who is this about?'), findsOneWidget);
+      await choose(tester, 'Something else — let me explain');
+      await tester.enterText(
+        find.byType(TextField).first,
+        'My cousin, sort of raised me',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      final chat = (await Backend.data.fetchChats(userId)).single;
+      final messages = await Backend.data.fetchMessages(chat.id);
+      expect(messages.single.answerText, 'My cousin, sort of raised me');
+
+      // Stepping back restores the free text, rather than showing the
+      // question as unanswered because nothing matched a fixed option.
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+      await tester.pumpAndSettle();
+      expect(find.text('My cousin, sort of raised me'), findsOneWidget);
+    });
   });
 
   group('describe your problem', () {
@@ -721,18 +750,21 @@ void main() {
       }
     });
 
-    test('every category offers a way out of its fixed options', () {
-      // A scripted MCQ that cannot express the user's actual situation is a
-      // trap. Every category needs either an open text question or an escape
-      // hatch option.
+    test('no category hardcodes its own "something else" any more', () {
+      // IntakeFlowScreen now renders a real "Something else — let me explain"
+      // tile, with a text box behind it, on every choice question — see the
+      // "a choice question with nothing that fits" test below. A category
+      // still hardcoding the words itself would put two of that tile on the
+      // same screen, one live and one a dead end; see AdaptiveFlowScreen's
+      // _clean_options for the same rule on the model's side.
       for (final category in ChatCategory.values) {
-        final questions = questionsFor(category, profile);
-        final hasText =
-            questions.any((q) => q.kind == IntakeAnswerKind.text);
-        final hasEscape = questions.any((q) => q.options.any(
-              (o) => o.toLowerCase().startsWith('something else'),
-            ));
-        expect(hasText || hasEscape, isTrue, reason: category.label);
+        for (final q in questionsFor(category, profile)) {
+          expect(
+            q.options.any((o) => o.toLowerCase().startsWith('something else')),
+            isFalse,
+            reason: '${category.label}/${q.id}',
+          );
+        }
       }
     });
   });

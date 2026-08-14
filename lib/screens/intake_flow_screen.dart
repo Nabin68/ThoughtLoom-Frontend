@@ -81,13 +81,21 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
   /// would drift.
   final Set<String> _choices = {};
 
+  /// Whether the free-text escape hatch is open. Always offered on a choice
+  /// question, whatever the category hardcoded — see the "Something else" tile
+  /// in [build]. Mirrors [AdaptiveFlowScreen], whose options are a guess too,
+  /// just a model's guess instead of a fixed list.
+  bool _writingOwnAnswer = false;
+
   IntakeQuestion get _question => _questions[_index];
 
   bool get _isLast => _index == _questions.length - 1;
 
   bool get _answered => _question.kind == IntakeAnswerKind.text
       ? _textController.text.trim().isNotEmpty
-      : _choices.isNotEmpty;
+      : _writingOwnAnswer
+          ? _textController.text.trim().isNotEmpty
+          : _choices.isNotEmpty;
 
   @override
   void dispose() {
@@ -121,6 +129,7 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
   void _loadPending() {
     _choices.clear();
     _textController.clear();
+    _writingOwnAnswer = false;
 
     final stored = _answers[_question.id];
     if (stored == null) return;
@@ -132,9 +141,17 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
     // Anything no longer on offer is dropped rather than shown as a ghost tick:
     // the option lists are rebuilt from the profile and from earlier answers, so
     // a stored answer can genuinely no longer exist.
-    _choices.addAll(
-      stored.split(selectionSeparator).where(_question.options.contains),
-    );
+    final picked =
+        stored.split(selectionSeparator).where(_question.options.contains);
+    if (picked.isNotEmpty) {
+      _choices.addAll(picked);
+    } else {
+      // Matched nothing on offer, so this was written through the free-text
+      // escape hatch rather than a tap — restore it the same way, rather than
+      // showing the question as unanswered.
+      _writingOwnAnswer = true;
+      _textController.text = stored;
+    }
   }
 
   void _toTop() {
@@ -143,6 +160,7 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
 
   void _select(String option) {
     setState(() {
+      _writingOwnAnswer = false;
       if (_question.isMulti) {
         // Ticking is a toggle; the last tick can be removed, and the Continue
         // button simply goes inert. Nothing here forces an answer the user does
@@ -168,7 +186,7 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
   /// transcript is read by a model, and "A; C; B" and "A; B; C" being different
   /// answers to the same question is noise it does not need.
   String? _answerValue() {
-    if (_question.kind == IntakeAnswerKind.text) {
+    if (_question.kind == IntakeAnswerKind.text || _writingOwnAnswer) {
       return _textController.text.trim();
     }
     return joinSelections(_question.options.where(_choices.contains));
@@ -368,17 +386,44 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
                           : TextInputAction.done,
                       onChanged: (_) => setState(() {}),
                     )
-                  else
+                  else ...[
                     for (final option in _question.options)
                       OptionTile(
                         label: option,
-                        selected: _choices.contains(option),
+                        selected: !_writingOwnAnswer && _choices.contains(option),
                         mode: _question.isMulti
                             ? ChoiceMode.multi
                             : ChoiceMode.single,
                         enabled: !_saving,
                         onTap: () => _select(option),
                       ),
+                    // Always present, whatever the category hardcoded: a fixed
+                    // list is a guess at every situation, and someone whose
+                    // answer is not on it needs a way to say so that is not
+                    // "pick the closest lie".
+                    OptionTile(
+                      label: 'Something else — let me explain',
+                      selected: _writingOwnAnswer,
+                      enabled: !_saving,
+                      onTap: () => setState(() {
+                        _writingOwnAnswer = true;
+                        _choices.clear();
+                      }),
+                    ),
+                    if (_writingOwnAnswer) ...[
+                      SizedBox(height: AppTheme.s3),
+                      AppTextField(
+                        controller: _textController,
+                        hintText: 'In your own words...',
+                        icon: Icons.edit_note_outlined,
+                        enabled: !_saving,
+                        maxLines: 4,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ],
+                  ],
                 ],
               ),
             ),

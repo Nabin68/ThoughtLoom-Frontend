@@ -1,5 +1,7 @@
 //auth_gate.dart
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/onboarding_questions.dart';
@@ -58,6 +60,16 @@ class _SignedInState extends State<_SignedIn> {
   void initState() {
     super.initState();
     _profile = Backend.data.ensureProfile(widget.user.id);
+    _warmUpBackend();
+  }
+
+  /// Fired the moment someone is found signed in — a fresh login and an app
+  /// launch into a restored session both land here. See [AiService.warmUp].
+  ///
+  /// Skipped on the on-device backend: there is no Render service behind it to
+  /// wake, so the ping would just be a network call that always fails.
+  void _warmUpBackend() {
+    if (Backend.usingSupabase) unawaited(Backend.ai.warmUp());
   }
 
   @override

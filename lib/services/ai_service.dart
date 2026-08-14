@@ -146,6 +146,19 @@ abstract class AiService {
   /// which is what lets the history screen ask again for a chat whose title
   /// never arrived.
   Future<void> completeChat({required String chatId});
+
+  /// Best-effort ping to wake a sleeping backend.
+  ///
+  /// Render's free tier puts the service to sleep after 15 minutes idle, and
+  /// the first request afterwards eats close to a minute of cold start before
+  /// it even starts on the model call. Firing this the moment someone is found
+  /// signed in — before they've reached a screen that needs the model — lets
+  /// that minute overlap with them looking at their dashboard instead of
+  /// stacking on top of their first real request.
+  ///
+  /// Never throws: a failed or slow ping is not worth surfacing, since nothing
+  /// here was promised to the caller in the first place.
+  Future<void> warmUp();
 }
 
 /// [AiService] against the FastAPI service.
@@ -290,5 +303,17 @@ class HttpAiService implements AiService {
       {'chat_id': chatId},
       timeout: ApiConfig.requestTimeout,
     );
+  }
+
+  @override
+  Future<void> warmUp() async {
+    // Deliberately not routed through [_post]: this must work without a
+    // token, since the whole point is to be fired the instant a user shows up
+    // — before anything downstream of sign-in has had a chance to fail.
+    try {
+      await _client.get(ApiConfig.healthUrl).timeout(const Duration(seconds: 15));
+    } catch (e) {
+      debugPrint('ThoughtLoom: warm-up ping failed — $e');
+    }
   }
 }
