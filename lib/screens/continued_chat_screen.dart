@@ -10,6 +10,7 @@ import '../services/chat_completion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_header.dart';
+import '../widgets/app_loader.dart';
 import '../widgets/dictation.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/rich_body.dart';
@@ -133,13 +134,12 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
 
   /// The turns worth re-reading, in order.
   ///
-  /// The recommendation and everything after it. The free-text description is
-  /// the one earlier exception, because it is the thing they actually said in
-  /// their own words — and it is what the advice was answering.
+  /// The recommendation, every reply after it, and every free_text row —
+  /// the original description as much as a follow-up turn, since both are
+  /// the user's own words and the description is what the advice was
+  /// answering. The scripted intake and the generated questions are not
+  /// shown here; they read as a form, not a conversation.
   List<_Bubble> _toBubbles(List<Message> messages) {
-    final recommendationIndex =
-        messages.indexWhere((m) => m.type == MessageType.recommendation);
-
     final bubbles = <_Bubble>[];
     for (var i = 0; i < messages.length; i++) {
       final message = messages[i];
@@ -156,11 +156,10 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
         case MessageType.assistantReply:
           bubbles.add(_Bubble(text: text, fromUser: false));
         case MessageType.freeText:
-          // Only the ones after the recommendation are part of this
-          // conversation. The original description came before it.
-          if (recommendationIndex != -1 && i > recommendationIndex) {
-            bubbles.add(_Bubble(text: text, fromUser: true));
-          }
+          // Every free_text row is the user's own words, whether it is the
+          // original description (written once, before the recommendation)
+          // or a follow-up turn (written after) — see the docstring above.
+          bubbles.add(_Bubble(text: text, fromUser: true));
         case MessageType.intake:
         case MessageType.adaptiveQuestion:
           break;
@@ -290,13 +289,7 @@ class _ContinuedChatScreenState extends State<ContinuedChatScreen> {
             ),
             Expanded(
               child: _loading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(AppTheme.primary),
-                      ),
-                    )
+                  ? const Center(child: AppLoader())
                   : _bubbles.isEmpty
                       ? const _NothingToContinue()
                       : _buildList(),
@@ -498,14 +491,7 @@ class _Typing extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-              ),
-            ),
+            const AppLoader(size: 15),
             SizedBox(width: AppTheme.s3),
             Text('Thinking...', style: AppTheme.meta(context)),
           ],

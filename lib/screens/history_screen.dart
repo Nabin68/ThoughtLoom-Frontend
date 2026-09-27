@@ -12,6 +12,7 @@ import '../widgets/app_background.dart';
 import '../widgets/app_button.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_header.dart';
+import '../widgets/app_loader.dart';
 import '../widgets/error_banner.dart';
 import 'chat_transcript_screen.dart';
 import 'continued_chat_screen.dart';
@@ -192,12 +193,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _buildList() {
     final hits = _hits;
     if (hits == null) {
-      return const Center(
-        child: CircularProgressIndicator(
-          strokeWidth: 3,
-          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-        ),
-      );
+      return const Center(child: AppLoader());
     }
 
     if (hits.isEmpty) {

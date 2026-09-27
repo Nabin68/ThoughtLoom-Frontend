@@ -414,6 +414,10 @@ void main() {
       final chat = (await Backend.data.fetchChats(userId)).single;
       final messages = await Backend.data.fetchMessages(chat.id);
       expect(messages.single.answerText, 'My cousin, sort of raised me');
+      // Not tagged as a choice answer: it is prose, not a tap, and must not
+      // be split on "; " or read back later as several ticked options.
+      expect(messages.single.metadata.containsKey('selected'), isFalse);
+      expect(messages.single.metadata.containsKey('options'), isFalse);
 
       // Stepping back restores the free text, rather than showing the
       // question as unanswered because nothing matched a fixed option.

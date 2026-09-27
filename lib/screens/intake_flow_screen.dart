@@ -199,6 +199,9 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
     final question = _question;
     final index = _index;
     final answer = skip ? null : _answerValue();
+    // Captured before _commit/_loadPending can touch it: this is what decides
+    // whether [answer] is a real selection or prose the user typed instead.
+    final viaFreeText = _writingOwnAnswer;
 
     setState(() {
       _saving = true;
@@ -206,7 +209,12 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
     });
 
     try {
-      await _commit(question: question, index: index, answer: answer);
+      await _commit(
+        question: question,
+        index: index,
+        answer: answer,
+        viaFreeText: viaFreeText,
+      );
       if (!mounted) return;
 
       if (_index >= _questions.length - 1) {
@@ -241,14 +249,22 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
   }
 
   /// Writes the answer, then rebuilds what comes after it.
+  ///
+  /// [viaFreeText] is whether [answer] came through the "Something else"
+  /// escape hatch rather than a tap. It matters here because [answer] is then
+  /// prose, not a joined list of options — splitting it on [selectionSeparator]
+  /// would treat a sentence that happens to contain "; " as though several
+  /// options had been ticked, corrupting both the transcript and what a later
+  /// prompt reads as "chose several" rather than "wrote this".
   Future<void> _commit({
     required IntakeQuestion question,
     required int index,
     required String? answer,
+    required bool viaFreeText,
   }) async {
     final metadata = <String, dynamic>{
       'question_id': question.id,
-      if (question.isChoice) ...{
+      if (question.isChoice && !viaFreeText) ...{
         'options': question.options,
         'selected': answer == null || answer.isEmpty
             ? const <String>[]

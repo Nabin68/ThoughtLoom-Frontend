@@ -7,11 +7,13 @@ import 'package:flutter/material.dart';
 import '../data/onboarding_questions.dart';
 import '../models/auth_user.dart';
 import '../models/user_profile.dart';
+import '../services/ai_service.dart';
 import '../services/backend.dart';
 import '../services/session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_button.dart';
+import '../widgets/app_loader.dart';
 import 'dashboard_screen.dart';
 import 'landing_screen.dart';
 import 'onboarding_screen.dart';
@@ -53,23 +55,55 @@ class _SignedIn extends StatefulWidget {
   State<_SignedIn> createState() => _SignedInState();
 }
 
-class _SignedInState extends State<_SignedIn> {
+class _SignedInState extends State<_SignedIn> with WidgetsBindingObserver {
   late Future<UserProfile> _profile;
 
   @override
   void initState() {
     super.initState();
     _profile = Backend.data.ensureProfile(widget.user.id);
+    WidgetsBinding.instance.addObserver(this);
     _warmUpBackend();
   }
 
-  /// Fired the moment someone is found signed in — a fresh login and an app
-  /// launch into a restored session both land here. See [AiService.warmUp].
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Coming back to the foreground is the second moment worth a warm-up.
+  ///
+  /// Render sleeps a free service fifteen minutes after its last request, and
+  /// nothing about the app being open keeps it awake. So someone who signs in,
+  /// waits out the cold start, then leaves the app sitting for twenty minutes
+  /// and comes back to start a chat meets a *sleeping* server — while
+  /// [backendWarm] still says true, which is worse than not knowing: the wait
+  /// then reads as "thinking" rather than as a server starting up.
+  ///
+  /// [_warmUpBackend] decides whether it is actually worth a ping, so this can
+  /// fire on every resume without turning an app-switch into a network call.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) _warmUpBackend();
+  }
+
+  /// Fired when someone is found signed in — a fresh login and a launch into a
+  /// restored session both land here — and again on every foreground resume.
+  /// See [AiService.warmUp].
   ///
   /// Skipped on the on-device backend: there is no Render service behind it to
   /// wake, so the ping would just be a network call that always fails.
+  ///
+  /// [backendMayHaveSlept] is what makes this safe to call as often as it is.
+  /// At sign-in nothing has answered yet, so it is always true; on a resume it
+  /// is true only if the backend has been quiet long enough to have been put
+  /// back to sleep.
   void _warmUpBackend() {
-    if (Backend.usingSupabase) unawaited(Backend.ai.warmUp());
+    if (!Backend.usingSupabase) return;
+    if (!backendMayHaveSlept()) return;
+    unawaited(Backend.ai.warmUp());
   }
 
   @override
@@ -161,14 +195,7 @@ class _Splash extends StatelessWidget {
               child: Image.asset('assets/logo.png', fit: BoxFit.contain),
             ),
             SizedBox(height: screenWidth * 0.1),
-            SizedBox(
-              width: screenWidth * 0.1,
-              height: screenWidth * 0.1,
-              child: const CircularProgressIndicator(
-                strokeWidth: 3,
-                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-              ),
-            ),
+            AppLoader(size: (screenWidth * 0.1).clamp(30.0, 46.0)),
           ],
         ),
       ),

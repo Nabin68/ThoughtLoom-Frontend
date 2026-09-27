@@ -1,7 +1,5 @@
 //adaptive_flow_screen.dart
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../models/chat.dart';
@@ -13,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_button.dart';
 import '../widgets/app_header.dart';
+import '../widgets/app_loader.dart';
 import '../widgets/app_text_field.dart';
 import '../widgets/dictation.dart';
 import '../widgets/error_banner.dart';
@@ -261,7 +260,7 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
                     onRetry: _errorRetryable ? _retry : null,
                   )
                 : _loading
-                    ? const _Thinking()
+                    ? const AppWaiting(lines: _thinkingLines)
                     : _buildQuestion(),
           ),
           if (_error == null && !_loading && _turn != null)
@@ -360,70 +359,18 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
   }
 }
 
-/// The wait while the model writes the next question.
+/// What to say while the model writes the next question.
 ///
-/// Rotating lines rather than a bare spinner: this can sit behind a Render cold
-/// start, and thirty silent seconds reads as broken.
-class _Thinking extends StatefulWidget {
-  const _Thinking();
-
-  @override
-  State<_Thinking> createState() => _ThinkingState();
-}
-
-class _ThinkingState extends State<_Thinking> {
-  static const _lines = [
-    'Reading what you said...',
-    'Thinking about that...',
-    'Working out what to ask next...',
-    'Still with you...',
-  ];
-
-  int _index = 0;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (mounted) setState(() => _index = (_index + 1) % _lines.length);
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const SizedBox(
-            width: 34,
-            height: 34,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-            ),
-          ),
-          SizedBox(height: AppTheme.s5),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 400),
-            child: Text(
-              _lines[_index],
-              key: ValueKey(_index),
-              style: AppTheme.secondary(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+/// Rotating lines rather than one, because this can sit behind a Render cold
+/// start and thirty silent seconds reads as broken. [AppWaiting] holds the
+/// timer and swaps in its own line while the backend is still waking — the
+/// wait before this one, and a different thing to say about it.
+const _thinkingLines = [
+  'Reading what you said...',
+  'Thinking about that...',
+  'Working out what to ask next...',
+  'Still with you...',
+];
 
 /// A failure with a way out. [onRetry] of null means retrying cannot help.
 class _Failure extends StatelessWidget {

@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/app_loader.dart';
 
 /// What a button is *for*, which is what decides how it looks.
 ///
@@ -112,14 +113,7 @@ class AppButton extends StatelessWidget {
     final edge = _edge;
 
     final content = busy
-        ? SizedBox(
-            width: 18 * scale,
-            height: 18 * scale,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              valueColor: AlwaysStoppedAnimation<Color>(_ink),
-            ),
-          )
+        ? AppLoader(size: 18 * scale, color: _ink)
         : Row(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,

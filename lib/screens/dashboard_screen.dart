@@ -9,6 +9,7 @@ import '../services/session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_header.dart';
+import '../widgets/app_loader.dart';
 import '../widgets/error_banner.dart';
 import 'history_screen.dart';
 import 'intake_flow_screen.dart';
@@ -272,10 +273,9 @@ class _CategoryCard extends StatelessWidget {
                     child: busy
                         ? Padding(
                             padding: EdgeInsets.all(11 * scale),
-                            child: const CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            child: const AppLoader(
+                              size: 20,
+                              color: Colors.white,
                             ),
                           )
                         : Icon(

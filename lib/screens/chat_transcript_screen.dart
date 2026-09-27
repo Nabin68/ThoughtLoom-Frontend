@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_header.dart';
+import '../widgets/app_loader.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/rich_body.dart';
 
@@ -92,12 +93,7 @@ class _ChatTranscriptScreenState extends State<ChatTranscriptScreen> {
               future: _messages,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-                    ),
-                  );
+                  return const Center(child: AppLoader());
                 }
                 if (snapshot.hasError) {
                   return Padding(

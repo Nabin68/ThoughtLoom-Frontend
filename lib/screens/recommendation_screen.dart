@@ -1,7 +1,5 @@
 //recommendation_screen.dart
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../models/chat.dart';
@@ -13,6 +11,7 @@ import '../widgets/app_background.dart';
 import '../widgets/app_button.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_header.dart';
+import '../widgets/app_loader.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/rich_body.dart';
 import 'continued_chat_screen.dart';
@@ -127,7 +126,12 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
                       onLeave: _finish,
                     )
                   : _loading
-                      ? const _Working()
+                      ? const AppWaiting(
+                          lines: _workingLines,
+                          interval: Duration(seconds: 5),
+                          size: 38,
+                          prominent: true,
+                        )
                       : _buildAnswer(),
             ),
             if (ready)
@@ -346,77 +350,18 @@ class _Confidence extends StatelessWidget {
   }
 }
 
-/// The long wait. This call searches the web and writes several hundred words,
-/// possibly behind a Render cold start — a minute is normal, so the screen has
-/// to keep saying something true.
-class _Working extends StatefulWidget {
-  const _Working();
-
-  @override
-  State<_Working> createState() => _WorkingState();
-}
-
-class _WorkingState extends State<_Working> {
-  static const _lines = [
-    'Going back over everything you said...',
-    'Weighing it up...',
-    'Checking a few things...',
-    'Working out what I actually think...',
-    'Nearly there — this one takes a moment...',
-  ];
-
-  int _index = 0;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted) setState(() => _index = (_index + 1) % _lines.length);
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: AppTheme.s8),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 38,
-              height: 38,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-              ),
-            ),
-            SizedBox(height: AppTheme.s6),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              child: Text(
-                _lines[_index],
-                key: ValueKey(_index),
-                textAlign: TextAlign.center,
-                style: AppTheme.body(context).copyWith(
-                  color: AppTheme.textDark,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+/// What to say during the long wait.
+///
+/// This call makes a search decision, up to three web lookups and a several
+/// hundred word generation, possibly behind a Render cold start — a minute is
+/// normal, so the screen has to keep saying something true for a minute.
+const _workingLines = [
+  'Going back over everything you said...',
+  'Weighing it up...',
+  'Checking a few things...',
+  'Working out what I actually think...',
+  'Nearly there — this one takes a moment...',
+];
 
 class _Failure extends StatelessWidget {
   final String message;

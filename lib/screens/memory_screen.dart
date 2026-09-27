@@ -11,6 +11,7 @@ import '../widgets/app_background.dart';
 import '../widgets/app_button.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_header.dart';
+import '../widgets/app_loader.dart';
 import '../widgets/error_banner.dart';
 
 /// What the app has concluded about the user, in the words it wrote them in.
@@ -236,12 +237,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
           ),
           Expanded(
             child: !loaded
-                ? const Center(
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-                    ),
-                  )
+                ? const Center(child: AppLoader())
                 : ListView(
                     physics: const BouncingScrollPhysics(),
                     padding: EdgeInsets.fromLTRB(
