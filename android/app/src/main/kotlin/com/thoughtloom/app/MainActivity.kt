@@ -1,4 +1,4 @@
-package com.example.thoughtloom
+package com.thoughtloom.app
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -45,6 +45,58 @@ the account but does not sign the user in — they get a "check your inbox"
 notice. To sign in immediately during development, turn off
 **Authentication → Providers → Email → Confirm email**.
 
+## Building a release APK
+
+Two things are supplied at build time and neither has a default that works in
+production. Miss the `--dart-define` flags and the app still builds, still
+launches, and silently runs on **on-device storage** — no Supabase sign-in, and
+the AI screens disabled. It looks like a working app, which is what makes it
+dangerous.
+
+```
+flutter build apk --release --dart-define=SUPABASE_URL=https://xxxx.supabase.co --dart-define=SUPABASE_ANON_KEY=your-publishable-or-anon-key
+```
+
+One line on purpose: it pastes into PowerShell and bash unchanged, where a
+backslash-continued version only works in one of them.
+
+Confirm it took: the app logs `ThoughtLoom: using Supabase backend.` on launch.
+`SUPABASE_URL / SUPABASE_ANON_KEY not set` means the flags did not reach it and
+the APK is not shippable.
+
+`API_BASE_URL` defaults to the deployed Render service, so it only needs
+`--dart-define=API_BASE_URL=...` when pointing at something else.
+
+### Release signing
+
+Release builds are signed with a keystore you create once and then never lose.
+Play matches every future upload against the key the **first** one was signed
+with: lose it and this listing can never be updated again, only replaced by a
+new app with a new package name.
+
+1. Create the keystore. Keep it **outside this repository** — a file that is not
+   in the working tree cannot be committed by accident:
+
+   ```
+   keytool -genkey -v -keystore C:/Users/<you>/keys/thoughtloom-upload.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+   ```
+
+   It asks for a password and for name/organisation details. The details are
+   cosmetic; the password is not.
+
+2. Copy `android/key.properties.example` to `android/key.properties` and fill in
+   the two passwords, the alias, and the **absolute** path to the `.jks`.
+   `key.properties` is gitignored and must stay that way.
+
+3. Back up the keystore and both passwords somewhere durable. This is the one
+   secret in the project that cannot be rotated.
+
+With no `key.properties` the release build is left **unsigned**. It does not fall
+back to the debug key, which is the point: a debug-signed release installs fine
+and looks correct, and the problem only surfaces when Play rejects the upload.
+An unsigned APK is refused by both a device and Play, so the mistake cannot get
+past you quietly.
+
 ## Architecture
 
 ```

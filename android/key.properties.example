@@ -1,0 +1,17 @@
+# Copy to android/key.properties and fill in. NEVER commit the real file —
+# it is gitignored, and it holds the passwords to the signing key.
+#
+# Create the keystore first (see README, "Release signing"). Keep the .jks
+# OUTSIDE this repository: a file that is not in the working tree cannot be
+# committed by accident.
+#
+# storeFile takes an absolute path. A relative one resolves against
+# android/app/, which is rarely what anyone means.
+#
+# If you lose this keystore you can never publish an update to the app again.
+# Back it up somewhere durable, along with these two passwords.
+
+storePassword=<the keystore password you chose>
+keyPassword=<the key password you chose>
+keyAlias=upload
+storeFile=C:/Users/<you>/keys/thoughtloom-upload.jks
