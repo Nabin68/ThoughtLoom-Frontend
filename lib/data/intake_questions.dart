@@ -258,6 +258,10 @@ List<String> _whatsWrong(PersonRef p) {
       '${p.subjectCap} ${p.doesnt} give me time',
       'I do not feel valued',
       'We fight about the same thing every time',
+      // Lives here rather than under "Have you told her?": it is something
+      // going on, not a point on how far the telling got, and putting it there
+      // turned a scale into a checklist.
+      '${p.subjectCap} ${p.verb("say")} it is fine and it is not',
       '${p.subjectCap} ${p.has} been pulling away',
       'I do not trust ${p.object} anymore',
       '${p.possessiveCap} family or friends are in the middle of it',
@@ -299,6 +303,7 @@ List<String> _whatsWrong(PersonRef p) {
     'I am expected to be someone I am not',
     if (children) 'I am worried about the choices ${p.subject} ${p.verb("make")}',
     'We fight about the same thing every time',
+    '${p.subjectCap} ${p.verb("say")} it is fine and it is not',
     'Something was said that has not been taken back',
     '${p.subjectCap} ${p.doesnt} know the thing I am not saying',
     'Honestly, I am the one in the wrong here',
@@ -353,13 +358,6 @@ List<IntakeQuestion> _relationship(
   final who = personFrom(answers['rel_who']);
   final decision = answers['rel_decision'];
 
-  final noIdea = '${who.subjectCap} ${who.has} no idea';
-  const hinted = 'I have hinted, that is all';
-  const once = 'We talked once and nothing changed';
-  const fight = 'It turns into a fight every time';
-  final saysFine =
-      '${who.subjectCap} ${who.verb("say")} it is fine and it is not';
-
   return [
     IntakeQuestion(
       id: 'rel_who',
@@ -388,8 +386,11 @@ List<IntakeQuestion> _relationship(
     IntakeQuestion(
       id: 'rel_decision',
       text: 'What are you trying to decide?',
-      // Single: one decision at a time, and whether "What is stopping you?"
-      // follows depends on which.
+      // Single, because rel_fear depends on it twice. Whether "What is stopping
+      // you?" is asked at all depends on which decision this is (none after a
+      // reflective one). And its answers only mean something against one
+      // decision: "I would lose her" is the fear of ending it, and the opposite
+      // fear from forgiving something — ticked after both, nobody can tell which.
       helper: 'Pick the main one.',
       options: _decisions(who),
     ),
@@ -437,33 +438,19 @@ List<IntakeQuestion> _relationship(
     IntakeQuestion(
       id: 'rel_spoken',
       text: 'Have you told ${who.object}?',
-      // Multi, with a single answer inside it. How far it got — no idea,
-      // hinted, once, many times — is one answer. How it goes — a fight, "it is
-      // fine" — can be several, and "we do not talk anymore" can sit alongside
-      // any of them.
-      helper: 'Pick everything that is true.',
-      kind: IntakeAnswerKind.multiChoice,
+      // Single: this is a scale — how far the telling has got — and only one
+      // point on a scale is true at a time. It used to be a checklist with the
+      // scale hidden inside it, which drew squares and behaved like circles.
+      // What happens when it comes up (fights, "it is fine") is not a point on
+      // this scale, so it is asked in rel_whats_wrong; whether an ex is still in
+      // touch is asked there too ("We still talk sometimes").
       options: [
-        noIdea,
-        hinted,
-        once,
+        '${who.subjectCap} ${who.has} no idea',
+        'I have hinted, that is all',
+        'We talked once and nothing changed',
         // Only for someone still in the user's life: an ex or someone they are
         // not with has no ongoing conversation to keep failing.
-        if (who.hasOngoing) ...[
-          'We have talked many times and nothing changes',
-          fight,
-          saysFine,
-        ],
-        if (who.tie == Tie.ex) 'We do not talk anymore',
-      ],
-      exclusiveGroups: [
-        [noIdea, hinted, once, 'We have talked many times and nothing changes'],
-        // "Every time" and "it is fine" both need a conversation to have
-        // happened, and "every time" needs more than one.
-        [noIdea, fight],
-        [noIdea, saysFine],
-        [hinted, fight],
-        [once, fight],
+        if (who.hasOngoing) 'We have talked many times and nothing changes',
       ],
     ),
 

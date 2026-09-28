@@ -73,9 +73,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   /// rather than a new user being onboarded.
   bool _toppingUp = false;
 
-  /// The current question's pending radio selection. Text answers live in
-  /// [_textController] instead.
-  String? _choice;
+  /// The current question's pending selection — one option for a radio, any
+  /// number for a multi-select. Text answers live in [_textController] instead.
+  Set<String> _choices = {};
 
   OnboardingQuestion get _question => onboardingQuestions[_index];
 
@@ -85,7 +85,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   /// Whitespace is not an answer.
   bool get _answered => _question.kind == OnboardingAnswerKind.text
       ? _textController.text.trim().isNotEmpty
-      : _choice != null;
+      : _choices.isNotEmpty;
 
   @override
   void didChangeDependencies() {
@@ -129,15 +129,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (_question.kind == OnboardingAnswerKind.text) {
       _textController.text = stored is String ? stored : '';
-      _choice = null;
+      _choices = {};
       return;
     }
 
     // An option that is no longer offered is treated as unanswered: the
     // question set is editable, and a stored answer that has since been
     // reworded would otherwise leave a selection the user cannot see.
-    _choice =
-        stored is String && _question.options.contains(stored) ? stored : null;
+    _choices = _question.picked(stored);
     _textController.clear();
   }
 
@@ -178,7 +177,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ? null
         : (_question.kind == OnboardingAnswerKind.text
             ? _textController.text.trim()
-            : _choice);
+            : _question.join(_choices));
     final next = {..._answers, _question.id: value};
     final finishing = _isLast;
 
@@ -357,12 +356,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         for (final option in _question.options)
           OptionTile(
             label: option,
-            selected: _choice == option,
+            selected: _choices.contains(option),
+            mode: _question.isMulti ? ChoiceMode.multi : ChoiceMode.single,
             enabled: !_saving,
             // Selecting does not advance. An accidental tap on a mis-read option
             // would otherwise be committed to the database before the user
             // finished reading it.
-            onTap: () => setState(() => _choice = option),
+            onTap: () =>
+                setState(() => _choices = _question.toggle(_choices, option)),
           ),
       ];
 

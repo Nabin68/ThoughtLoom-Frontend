@@ -101,7 +101,11 @@ const List<OnboardingQuestion> onboardingQuestions = [
   OnboardingQuestion(
     id: 'field_of_study',
     text: 'What did you study, or what are you studying?',
-    helper: 'Pick the closest one.',
+    // Multi: an engineer with an MBA studied both, and nothing downstream needs
+    // just one field — it only grounds the model's advice.
+    helper: 'Pick every one that fits.',
+    kind: OnboardingAnswerKind.multiChoice,
+    soloOptions: ['Not studied formally'],
     options: [
       'Engineering or technology',
       'Medicine or healthcare',
@@ -217,7 +221,12 @@ const List<OnboardingQuestion> onboardingQuestions = [
   // changes the form of every answer the app will ever give.
   OnboardingQuestion(
     id: 'decision_style',
-    text: 'When a decision is hard, what usually helps you most?',
+    // Multi: talking it through *and* a clear plan is the common answer, and
+    // "most" only made people rank things that are all true. The model reads
+    // every one of them; nothing branches on a single style.
+    text: 'When a decision is hard, what usually helps you?',
+    helper: 'Pick everything that does.',
+    kind: OnboardingAnswerKind.multiChoice,
     options: [
       'Talking it through with someone',
       'Seeing the numbers and comparisons',

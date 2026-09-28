@@ -783,12 +783,14 @@ void main() {
         expect(ex.firstWhere((q) => q.id == 'rel_duration').text,
             'How long ago did it end?');
 
-        final spoken = opts(ex, 'rel_spoken');
-        expect(spoken, contains('We do not talk anymore'));
-        expect(spoken, isNot(contains('It turns into a fight every time')));
-        expect(spoken, isNot(contains('She says it is fine and it is not')));
-        expect(spoken,
-            isNot(contains('We have talked many times and nothing changes')));
+        // A pure scale, with no step past "once": there is no ongoing
+        // conversation with an ex to keep failing.
+        expect(opts(ex, 'rel_spoken'), [
+          'She has no idea',
+          'I have hinted, that is all',
+          'We talked once and nothing changed',
+        ]);
+        expect(wrong, isNot(contains('She says it is fine and it is not')));
 
         final fear = opts(ex, 'rel_fear');
         expect(fear, isNot(contains('I do not want to be alone')));
@@ -820,7 +822,7 @@ void main() {
         expect(decide, isNot(contains('Whether to commit further')));
 
         expect(opts(want, 'rel_spoken'),
-            isNot(contains('It turns into a fight every time')));
+            isNot(contains('We have talked many times and nothing changes')));
         expect(opts(want, 'rel_fear'), isNot(contains('I do not want to be alone')));
       });
 
@@ -964,12 +966,17 @@ void main() {
       // And these take several for the same reason; the durations, deadlines,
       // and the one decision a chat is about stay single.
       const alsoMulti = {
-        ChatCategory.relationship: ['rel_spoken', 'rel_fear'],
+        ChatCategory.relationship: ['rel_fear'],
         ChatCategory.education: ['edu_geography'],
         ChatCategory.other: ['oth_area'],
       };
       const single = {
-        ChatCategory.relationship: ['rel_who', 'rel_decision', 'rel_duration'],
+        ChatCategory.relationship: [
+          'rel_who',
+          'rel_decision',
+          'rel_duration',
+          'rel_spoken',
+        ],
         ChatCategory.education: ['edu_decision', 'edu_stage'],
         ChatCategory.financial: ['fin_decision', 'fin_scale', 'fin_urgency'],
         ChatCategory.other: ['oth_shape', 'oth_urgency'],
@@ -1023,7 +1030,6 @@ void main() {
       // Every term on offer: a profile that declined the status question.
       final who = q(ChatCategory.relationship, 'rel_who');
       expect(who.kind, IntakeAnswerKind.choice);
-      expect(who.exclusiveGroups, isEmpty);
       expect(tap(who, ['Someone I am seeing', 'Someone I want to be with',
           'My ex-boyfriend', 'My parents or family', 'My children']),
           {'My children'}, reason: 'each tap replaces the last');
@@ -1045,30 +1051,60 @@ void main() {
           {'Whether to commit further'});
     });
 
-    test('how far a conversation got is one answer inside a multi-select', () {
+    test('how far the telling got is a scale, and a scale is one answer', () {
+      // The bug this replaces: squares on screen, but the first four options
+      // unticked each other like circles while the last two stacked. Now it is
+      // circles and it behaves like circles, and the things that stacked —
+      // the fights, "it is fine" — are Q2 options, where they belong.
       final spoken = q(ChatCategory.relationship, 'rel_spoken',
           answers: {'rel_who': 'My girlfriend'});
+      expect(spoken.kind, IntakeAnswerKind.choice);
+      expect(spoken.options, [
+        'She has no idea',
+        'I have hinted, that is all',
+        'We talked once and nothing changed',
+        'We have talked many times and nothing changes',
+      ]);
       expect(
           tap(spoken, [
+            'She has no idea',
             'We talked once and nothing changed',
             'We have talked many times and nothing changes',
           ]),
           {'We have talked many times and nothing changes'});
+
+      final wrong = q(ChatCategory.relationship, 'rel_whats_wrong',
+          answers: {'rel_who': 'My girlfriend'});
       expect(
-          tap(spoken, [
-            'We have talked many times and nothing changes',
-            'It turns into a fight every time',
+          tap(wrong, [
+            'We fight about the same thing every time',
             'She says it is fine and it is not',
           ]),
-          hasLength(3));
+          hasLength(2));
       expect(
-          tap(spoken, ['It turns into a fight every time', 'She has no idea']),
-          {'She has no idea'});
+          q(ChatCategory.relationship, 'rel_whats_wrong',
+                  answers: {'rel_who': 'My parents or family'})
+              .options,
+          contains('They say it is fine and it is not'));
+    });
 
-      final ex = q(ChatCategory.relationship, 'rel_spoken',
-          answers: {'rel_who': 'My ex-wife'});
-      expect(tap(ex, ['She has no idea', 'We do not talk anymore']),
-          hasLength(2), reason: 'never told her, and no longer in touch');
+    test('a square never unticks another square, except an opt-out', () {
+      // Rule 5: peers on a multi-select are independent. Only the declared
+      // opt-outs clear the list — checked on every multi-select question in
+      // every category, under the broad profile that offers every option.
+      for (final category in ChatCategory.values) {
+        for (final question in questionsFor(category, profileWith(const {}))) {
+          if (!question.isMulti) continue;
+          final peers = question.options
+              .where((o) => !question.soloOptions.contains(o))
+              .toList();
+          expect(tap(question, peers), peers.toSet(), reason: question.id);
+          for (final solo in question.soloOptions) {
+            expect(tap(question, [...peers, solo]), {solo},
+                reason: '${question.id} / $solo');
+          }
+        }
+      }
     });
 
     test('"anywhere" and "not sure" rule out specific places', () {
@@ -1098,7 +1134,7 @@ void main() {
           'rel_whats_wrong': true,
           'rel_decision': false,
           'rel_duration': false,
-          'rel_spoken': true,
+          'rel_spoken': false,
           'rel_fear': true,
         },
         ChatCategory.education: {
@@ -1147,25 +1183,47 @@ void main() {
 
     // Circle for one answer, square for several — on every tile of every
     // scripted question, "Something else" included, so no list mixes the two.
+    // And it has to *act* like its shape, on screen, not just be coded as it:
+    // a second tap on a circle list moves the dot, a second tap on a square
+    // list adds a tick, and tapping a tick again takes it off.
     for (final category in ChatCategory.values) {
-      testWidgets('${category.label}: every tile has its question\'s shape',
+      testWidgets('${category.label}: every question looks and acts its shape',
           (tester) async {
         final userId = await signInWithProfile(tester);
         await tapCategory(tester, category);
         final profile = (await Backend.data.fetchProfile(userId))!;
 
+        Set<String> ticked() => {
+              for (final t in tester.widgetList<OptionTile>(find.byType(OptionTile)))
+                if (t.selected) t.label,
+            };
+
         final answers = <String, String?>{};
         var questions = questionsFor(category, profile, answers);
         for (var i = 0; i < questions.length; i++) {
           final question = questions[i];
-          final want = question.isMulti ? ChoiceMode.multi : ChoiceMode.single;
-          final tiles = tester.widgetList<OptionTile>(find.byType(OptionTile));
           if (question.isChoice) {
+            final want = question.isMulti ? ChoiceMode.multi : ChoiceMode.single;
+            final tiles = tester.widgetList<OptionTile>(find.byType(OptionTile));
             expect(tiles, hasLength(question.options.length + 1),
                 reason: '${question.id}: its options and "Something else"');
-          }
-          for (final tile in tiles) {
-            expect(tile.mode, want, reason: '${question.id} / ${tile.label}');
+            for (final tile in tiles) {
+              expect(tile.mode, want, reason: '${question.id} / ${tile.label}');
+            }
+
+            final peers = question.options
+                .where((o) => !question.soloOptions.contains(o))
+                .toList();
+            final a = peers[0], b = peers[1];
+            await choose(tester, a);
+            await choose(tester, b);
+            expect(ticked(), question.isMulti ? {a, b} : {b},
+                reason: '${question.id}: tapped "$a" then "$b"');
+            if (question.isMulti) {
+              await choose(tester, a);
+              await choose(tester, b);
+              expect(ticked(), isEmpty, reason: '${question.id}: untick');
+            }
           }
           answers[question.id] = await answerCurrent(tester, question,
               isLast: i == questions.length - 1);

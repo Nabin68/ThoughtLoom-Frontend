@@ -45,15 +45,11 @@ class IntakeQuestion {
   final IconData? icon;
   final int maxLines;
 
-  /// On a multi-select, sets of options that cannot be true together — at most
-  /// one of each is ever ticked. "My ex-girlfriend" and "My ex-boyfriend" are
-  /// two words for the one ex, not two people. An option may sit in several
-  /// groups; ticking it unticks anything it shares a group with.
-  final List<List<String>> exclusiveGroups;
-
-  /// On a multi-select, options that rule out every other: "Nobody but me",
-  /// "Not sure yet". Ticking one clears the rest, and ticking anything else
-  /// clears it.
+  /// On a multi-select, opt-outs that mean "none of the others": "Nobody but
+  /// me", "Not sure yet". Ticking one clears the rest, and ticking anything else
+  /// clears it. This is the only way a square ever unticks another square —
+  /// options that are merely incompatible peers mean the list is two questions,
+  /// and it gets split instead (see `rel_spoken`).
   final List<String> soloOptions;
 
   const IntakeQuestion({
@@ -66,7 +62,6 @@ class IntakeQuestion {
     this.hint,
     this.icon,
     this.maxLines = 1,
-    this.exclusiveGroups = const [],
     this.soloOptions = const [],
   });
 
@@ -75,22 +70,29 @@ class IntakeQuestion {
 
   bool get isMulti => kind == IntakeAnswerKind.multiChoice;
 
-  bool _conflict(String a, String b) =>
-      soloOptions.contains(a) ||
-      soloOptions.contains(b) ||
-      exclusiveGroups.any((g) => g.contains(a) && g.contains(b));
-
   /// What is ticked after tapping [option], given [picked] before. The one place
   /// the rules above are applied, so the screen and the tests cannot disagree.
-  Set<String> toggle(Set<String> picked, String option) {
-    if (!isMulti) return {option};
-    if (picked.contains(option)) return {...picked}..remove(option);
-    return {
-      for (final p in picked)
-        if (!_conflict(p, option)) p,
-      option,
-    };
-  }
+  Set<String> toggle(Set<String> picked, String option) =>
+      toggleChoice(picked, option, multi: isMulti, solo: soloOptions);
+}
+
+/// Tapping [option] on a list where [picked] is ticked.
+///
+/// Single-select: the tap replaces whatever was there — a circle is one answer.
+/// Multi-select: the tap flips that option alone, except that an opt-out in
+/// [solo] clears everything else and anything else clears it. Shared by the
+/// intake, onboarding, and profile screens so a circle and a square behave the
+/// same wherever they are drawn.
+Set<String> toggleChoice(
+  Set<String> picked,
+  String option, {
+  required bool multi,
+  List<String> solo = const [],
+}) {
+  if (!multi) return {option};
+  if (picked.contains(option)) return {...picked}..remove(option);
+  if (solo.contains(option)) return {option};
+  return {...picked.where((p) => !solo.contains(p)), option};
 }
 
 /// How a multi-select answer is written to `answer_text`.

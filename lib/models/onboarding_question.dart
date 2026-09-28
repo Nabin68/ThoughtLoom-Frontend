@@ -2,12 +2,16 @@
 
 import 'package:flutter/material.dart';
 
+import 'intake_question.dart';
+
 /// How a question is answered.
 ///
-/// Radio is the default everywhere; [text] is only for questions whose honest
-/// answer space is unbounded, where a fixed option list would force the user to
-/// pick a lie.
-enum OnboardingAnswerKind { choice, text }
+/// Radio is the default; [multiChoice] is for the questions where more than one
+/// option can be true of someone at once and nothing downstream needs just one
+/// (see the rule in `docs/BUILD_LOG.md`, Prompt 14). [text] is only for
+/// questions whose honest answer space is unbounded, where a fixed option list
+/// would force the user to pick a lie.
+enum OnboardingAnswerKind { choice, multiChoice, text }
 
 /// A `user_profiles` column an answer is mirrored into.
 ///
@@ -31,8 +35,12 @@ class OnboardingQuestion {
 
   final OnboardingAnswerKind kind;
 
-  /// Radio options, in display order. Empty for [OnboardingAnswerKind.text].
+  /// Options, in display order. Empty for [OnboardingAnswerKind.text].
   final List<String> options;
+
+  /// On a multi-select, opt-outs that clear every other option — see
+  /// `IntakeQuestion.soloOptions`.
+  final List<String> soloOptions;
 
   /// When true the user can move on without answering, and the skip is recorded
   /// as an explicit null so resume does not stop here again.
@@ -52,10 +60,27 @@ class OnboardingQuestion {
     this.helper,
     this.kind = OnboardingAnswerKind.choice,
     this.options = const [],
+    this.soloOptions = const [],
     this.optional = false,
     this.hint,
     this.icon,
     this.maxLines = 1,
     this.column,
   });
+
+  bool get isMulti => kind == OnboardingAnswerKind.multiChoice;
+
+  /// The options stored in [answer], in option order. A multi-select answer is
+  /// joined with `selectionSeparator`, the same as an intake answer.
+  Set<String> picked(Object? answer) => answer is String
+      ? answer.split(selectionSeparator).where(options.contains).toSet()
+      : {};
+
+  /// [picked] as the string that is stored — in option order, so the same
+  /// ticks always make the same answer.
+  String join(Set<String> picked) =>
+      joinSelections(options.where(picked.contains));
+
+  Set<String> toggle(Set<String> picked, String option) =>
+      toggleChoice(picked, option, multi: isMulti, solo: soloOptions);
 }

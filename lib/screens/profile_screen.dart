@@ -569,14 +569,22 @@ class _TextEditSheetState extends State<_TextEditSheet> {
   }
 }
 
-class _ChoiceEditSheet extends StatelessWidget {
+class _ChoiceEditSheet extends StatefulWidget {
   final OnboardingQuestion question;
   final String? selected;
 
   const _ChoiceEditSheet({required this.question, this.selected});
 
   @override
+  State<_ChoiceEditSheet> createState() => _ChoiceEditSheetState();
+}
+
+class _ChoiceEditSheetState extends State<_ChoiceEditSheet> {
+  late Set<String> _picked = widget.question.picked(widget.selected);
+
+  @override
   Widget build(BuildContext context) {
+    final question = widget.question;
     return _Sheet(
       title: question.text,
       helper: question.helper,
@@ -588,11 +596,16 @@ class _ChoiceEditSheet extends StatelessWidget {
             for (final option in question.options)
               OptionTile(
                 label: option,
-                selected: selected == option,
-                // Tapping an option is the whole interaction here — there is one
-                // value and picking it is the edit, so a Save button underneath
-                // would be a second tap that does nothing.
-                onTap: () => Navigator.pop(context, option),
+                selected: _picked.contains(option),
+                mode: question.isMulti ? ChoiceMode.multi : ChoiceMode.single,
+                // On a radio, tapping an option is the whole interaction —
+                // there is one value and picking it is the edit, so a Save
+                // button underneath would be a second tap that does nothing. A
+                // multi-select has no such moment, so it ticks and waits.
+                onTap: question.isMulti
+                    ? () => setState(
+                        () => _picked = question.toggle(_picked, option))
+                    : () => Navigator.pop(context, option),
               ),
             if (question.optional)
               AppButton.quiet(
@@ -605,6 +618,14 @@ class _ChoiceEditSheet extends StatelessWidget {
           ],
         ),
       ),
+      footer: question.isMulti
+          ? AppButton(
+              label: 'Save',
+              onPressed: _picked.isEmpty
+                  ? null
+                  : () => Navigator.pop(context, question.join(_picked)),
+            )
+          : null,
     );
   }
 }

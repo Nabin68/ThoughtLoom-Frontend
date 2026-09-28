@@ -10,6 +10,7 @@ import 'package:thoughtloom/screens/dashboard_screen.dart';
 import 'package:thoughtloom/screens/onboarding_screen.dart';
 import 'package:thoughtloom/services/backend.dart';
 import 'package:thoughtloom/widgets/app_button.dart';
+import 'package:thoughtloom/widgets/option_tile.dart';
 
 /// Covers the one-time basic profile: that answers land in the database as the
 /// user goes rather than at the end, that an interrupted run resumes, and that
@@ -242,6 +243,90 @@ void main() {
     expect(find.byType(DashboardScreen), findsOneWidget);
     expect(find.byType(OnboardingScreen), findsNothing);
     expect(find.text('Hello, Ada'), findsOneWidget);
+  });
+
+  // The shape of a control is a promise about how it behaves. Walks every
+  // onboarding question, then edits every choice answer from the profile
+  // screen, checking both that each tile is drawn as its question's kind and
+  // that tapping acts like it: a second tap on a circle list moves the dot, a
+  // second tap on a square list adds a tick.
+  testWidgets('every question looks and acts its shape, here and on Profile',
+      (tester) async {
+    final userId = await register(tester);
+
+    Iterable<OptionTile> tiles() =>
+        tester.widgetList<OptionTile>(find.byType(OptionTile));
+    Set<String> ticked() => {
+          for (final t in tiles())
+            if (t.selected) t.label,
+        };
+    void expectShape(OnboardingQuestion q) {
+      final want = q.isMulti ? ChoiceMode.multi : ChoiceMode.single;
+      expect(tiles(), hasLength(q.options.length), reason: q.id);
+      for (final t in tiles()) {
+        expect(t.mode, want, reason: '${q.id} / ${t.label}');
+      }
+    }
+
+    List<String> peers(OnboardingQuestion q) =>
+        q.options.where((o) => !q.soloOptions.contains(o)).toList();
+
+    for (final q in onboardingQuestions) {
+      if (q.kind == OnboardingAnswerKind.text) {
+        await typeAnswer(tester, 'something true');
+      } else {
+        expectShape(q);
+        final [a, b, ...] = peers(q);
+        await choose(tester, a);
+        await choose(tester, b);
+        expect(ticked(), q.isMulti ? {a, b} : {b},
+            reason: '${q.id}: tapped "$a" then "$b"');
+        if (q.isMulti) {
+          await choose(tester, a);
+          expect(ticked(), {b}, reason: '${q.id}: untick');
+          for (final solo in q.soloOptions) {
+            await choose(tester, solo);
+            expect(ticked(), {solo}, reason: '${q.id}: opt-out');
+            await choose(tester, b);
+            expect(ticked(), {b}, reason: '${q.id}: opt-out cleared');
+          }
+        }
+      }
+      await tester.tap(
+          find.text(q == onboardingQuestions.last ? 'Finish' : 'Continue'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.byType(DashboardScreen), findsOneWidget);
+
+    // Every choice answer was the second option tapped.
+    var stored = (await Backend.data.fetchProfile(userId))!.onboardingAnswers;
+    for (final q in onboardingQuestions.where((q) => q.options.isNotEmpty)) {
+      expect(stored[q.id], peers(q)[1], reason: q.id);
+    }
+
+    await tester.tap(find.byTooltip('Profile and sign out'));
+    await tester.pumpAndSettle();
+
+    for (final q in onboardingQuestions.where((q) => q.options.isNotEmpty)) {
+      final row = find.text(q.text);
+      await tester.ensureVisible(row);
+      await tester.pumpAndSettle();
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+
+      expectShape(q);
+      final [a, b, ...] = peers(q);
+      expect(ticked(), {b}, reason: '${q.id}: opens on the stored answer');
+      await choose(tester, a);
+      if (q.isMulti) {
+        expect(ticked(), {a, b}, reason: '${q.id}: a tick adds');
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+      }
+      stored = (await Backend.data.fetchProfile(userId))!.onboardingAnswers;
+      expect(stored[q.id], q.isMulti ? q.join({a, b}) : a,
+          reason: '${q.id}: saved from the profile sheet');
+    }
   });
 
   group('firstUnansweredIndex', () {
