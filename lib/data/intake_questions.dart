@@ -70,10 +70,6 @@ class PersonRef {
   /// How to name them in a question: "your girlfriend", "your family".
   final String noun;
 
-  /// How the user names them in an answer: "my girlfriend". Used when several
-  /// people were picked, so an option can say *which* one it is about.
-  final String mine;
-
   /// she / he / they.
   final String subject;
 
@@ -92,7 +88,6 @@ class PersonRef {
 
   const PersonRef({
     required this.noun,
-    required this.mine,
     required this.subject,
     required this.object,
     required this.possessive,
@@ -104,7 +99,10 @@ class PersonRef {
   bool get isPartner => tie == Tie.partner;
   bool get isEx => tie == Tie.ex;
   bool get isWant => tie == Tie.want;
-  bool get isRomantic => isPartner || isEx || isWant;
+
+  /// Still in the user's life. Not an ex, not someone they only want to be
+  /// with — neither has an ongoing relationship to fight in.
+  bool get hasOngoing => !isEx && !isWant;
 
   static String _capitalise(String word) =>
       word[0].toUpperCase() + word.substring(1);
@@ -127,42 +125,24 @@ class PersonRef {
   /// The present tense of [stem] agreeing with [subject]: "wants" / "want".
   String verb(String stem) => singularVerb ? '${stem}s' : stem;
 
-  /// The same person, named instead of pronouned: "My girlfriend doesn't give
-  /// me time". What a group chat's options use, where "She" and "They" on one
-  /// screen would leave the reader guessing who each line is about.
-  PersonRef get asNamed => PersonRef(
-        noun: mine,
-        mine: mine,
-        subject: mine,
-        object: mine,
-        possessive: "$mine's",
-        // A family and children are plural whatever they are called; every other
-        // named person is one person, even one who is "they".
-        singularVerb: tie != Tie.family && tie != Tie.children,
-        tie: tie,
-      );
-
-  static PersonRef _she(String noun, String mine, Tie tie) => PersonRef(
+  static PersonRef _she(String noun, Tie tie) => PersonRef(
       noun: noun,
-      mine: mine,
       subject: 'she',
       object: 'her',
       possessive: 'her',
       singularVerb: true,
       tie: tie);
 
-  static PersonRef _he(String noun, String mine, Tie tie) => PersonRef(
+  static PersonRef _he(String noun, Tie tie) => PersonRef(
       noun: noun,
-      mine: mine,
       subject: 'he',
       object: 'him',
       possessive: 'his',
       singularVerb: true,
       tie: tie);
 
-  static PersonRef _they(String noun, String mine, Tie tie) => PersonRef(
+  static PersonRef _they(String noun, Tie tie) => PersonRef(
       noun: noun,
-      mine: mine,
       subject: 'they',
       object: 'them',
       possessive: 'their',
@@ -170,84 +150,35 @@ class PersonRef {
       tie: tie);
 
   /// Someone typed in, or nobody chosen yet.
-  static final unknown = _they('them', 'them', Tie.unknown);
+  static final unknown = _they('them', Tie.unknown);
 }
 
-/// One `rel_who` option read back into a [PersonRef], or null for text that is
-/// not an option — a typed answer.
+/// The `rel_who` answer as a [PersonRef]. Anything that is not exactly one of
+/// the options — a typed "Something else" answer, or nothing yet — is
+/// [PersonRef.unknown], which gets the broad option set.
 ///
 /// Matches the option strings built by [_aboutWhomOptions]; the test suite
 /// walks every one of those through here, so rewording an option without
 /// touching this fails loudly rather than silently degrading to "them".
-PersonRef? _personOrNull(String option) => switch (option) {
-      'My girlfriend' =>
-        PersonRef._she('your girlfriend', 'my girlfriend', Tie.partner),
-      'My wife' => PersonRef._she('your wife', 'my wife', Tie.partner),
-      'My boyfriend' =>
-        PersonRef._he('your boyfriend', 'my boyfriend', Tie.partner),
-      'My husband' => PersonRef._he('your husband', 'my husband', Tie.partner),
-      'My partner' =>
-        PersonRef._they('your partner', 'my partner', Tie.partner),
-      'Someone I am seeing' =>
-        PersonRef._they('them', 'the person I am seeing', Tie.partner),
-      'My ex-girlfriend' =>
-        PersonRef._she('your ex-girlfriend', 'my ex-girlfriend', Tie.ex),
-      'My ex-wife' => PersonRef._she('your ex-wife', 'my ex-wife', Tie.ex),
-      'My ex-boyfriend' =>
-        PersonRef._he('your ex-boyfriend', 'my ex-boyfriend', Tie.ex),
-      'My ex-husband' =>
-        PersonRef._he('your ex-husband', 'my ex-husband', Tie.ex),
-      'My ex-partner' =>
-        PersonRef._they('your ex-partner', 'my ex-partner', Tie.ex),
-      'Someone I want to be with' =>
-        PersonRef._they('them', 'the person I want to be with', Tie.want),
-      'My parents or family' =>
-        PersonRef._they('your family', 'my family', Tie.family),
-      'My children' =>
-        PersonRef._they('your children', 'my children', Tie.children),
-      'A close friend' =>
-        PersonRef._they('your friend', 'my friend', Tie.friend),
-      'Someone at work' =>
-        PersonRef._they('them', 'the person at work', Tie.work),
-      _ => null,
+PersonRef personFrom(String? answer) => switch (answer) {
+      'My girlfriend' => PersonRef._she('your girlfriend', Tie.partner),
+      'My wife' => PersonRef._she('your wife', Tie.partner),
+      'My boyfriend' => PersonRef._he('your boyfriend', Tie.partner),
+      'My husband' => PersonRef._he('your husband', Tie.partner),
+      'My partner' => PersonRef._they('your partner', Tie.partner),
+      'Someone I am seeing' => PersonRef._they('them', Tie.partner),
+      'My ex-girlfriend' => PersonRef._she('your ex-girlfriend', Tie.ex),
+      'My ex-wife' => PersonRef._she('your ex-wife', Tie.ex),
+      'My ex-boyfriend' => PersonRef._he('your ex-boyfriend', Tie.ex),
+      'My ex-husband' => PersonRef._he('your ex-husband', Tie.ex),
+      'My ex-partner' => PersonRef._they('your ex-partner', Tie.ex),
+      'Someone I want to be with' => PersonRef._they('them', Tie.want),
+      'My parents or family' => PersonRef._they('your family', Tie.family),
+      'My children' => PersonRef._they('your children', Tie.children),
+      'A close friend' => PersonRef._they('your friend', Tie.friend),
+      'Someone at work' => PersonRef._they('them', Tie.work),
+      _ => PersonRef.unknown,
     };
-
-/// A single `rel_who` answer as a [PersonRef]; [PersonRef.unknown] for anything
-/// that is not exactly one option.
-PersonRef personFrom(String? answer) {
-  final cast = castFrom(answer);
-  return cast.isGroup ? PersonRef.unknown : cast.people.single;
-}
-
-/// Everyone a relationship chat is about. `rel_who` is multi-select, because
-/// "my girlfriend and her family" is one situation, not a choice between two.
-class Cast {
-  /// Never empty: a typed or missing answer is one [PersonRef.unknown].
-  final List<PersonRef> people;
-
-  const Cast(this.people);
-
-  bool get isGroup => people.length > 1;
-
-  Set<Tie> get ties => {for (final p in people) p.tie};
-
-  /// Who the shared questions are worded about: the person, or "them".
-  PersonRef get speak => isGroup ? _group : people.single;
-
-  static final _group = PersonRef._they('them', 'them', Tie.unknown);
-
-  /// Anyone the user is still in touch with. Not an ex, not someone they only
-  /// want to be with — neither has an ongoing relationship to fight in.
-  bool get hasOngoing => ties.any((t) => t != Tie.ex && t != Tie.want);
-}
-
-Cast castFrom(String? answer) {
-  final people = [
-    for (final part in (answer ?? '').split(selectionSeparator))
-      if (_personOrNull(part.trim()) case final p?) p,
-  ];
-  return Cast(people.isEmpty ? [PersonRef.unknown] : people);
-}
 
 /// Whether the profile says married specifically, rather than merely committed.
 bool _isMarried(UserProfile profile) =>
@@ -298,26 +229,6 @@ List<String> _romanticOptions(UserProfile profile) {
   return options.toSet().toList();
 }
 
-/// Words for the one current partner. Multi-select lets someone name their
-/// partner *and* their family, but not call the same person both "my wife" and
-/// "my girlfriend".
-const _partnerTerms = [
-  'My girlfriend',
-  'My boyfriend',
-  'My wife',
-  'My husband',
-  'My partner',
-];
-
-/// Words for the one ex — the same rule.
-const _exTerms = [
-  'My ex-girlfriend',
-  'My ex-boyfriend',
-  'My ex-wife',
-  'My ex-husband',
-  'My ex-partner',
-];
-
 List<String> _aboutWhomOptions(UserProfile profile) => [
       ..._romanticOptions(profile),
       'My parents or family',
@@ -341,30 +252,8 @@ const _reflectiveDecisions = {
   'Whether to give it more time',
 };
 
-/// Builds an option list per person, worded about them, and merges it.
-///
-/// One person: pronouns — "She doesn't give me time". Several: each romantic
-/// person by name — "My girlfriend doesn't give me time" — so a line about her
-/// is not read as being about the family picked alongside her. The
-/// non-romantic people share one list, by name if there is one of them.
-List<String> _perPerson(
-  Cast cast,
-  List<String> Function(PersonRef p, Set<Tie> ties) build,
-) {
-  if (!cast.isGroup) return build(cast.speak, cast.ties);
-  final others = cast.people.where((p) => !p.isRomantic).toList();
-  return {
-    for (final p in cast.people.where((p) => p.isRomantic))
-      ...build(p.asNamed, {p.tie}),
-    if (others.length == 1)
-      ...build(others.single.asNamed, {others.single.tie})
-    else if (others.isNotEmpty)
-      ...build(Cast._group, {for (final p in others) p.tie}),
-  }.toList();
-}
-
-List<String> _whatsWrong(PersonRef p, Set<Tie> ties) {
-  if (ties.contains(Tie.partner)) {
+List<String> _whatsWrong(PersonRef p) {
+  if (p.tie == Tie.partner) {
     return [
       '${p.subjectCap} ${p.doesnt} give me time',
       'I do not feel valued',
@@ -378,7 +267,7 @@ List<String> _whatsWrong(PersonRef p, Set<Tie> ties) {
       'Honestly, I am the one who has checked out',
     ];
   }
-  if (ties.contains(Tie.ex)) {
+  if (p.tie == Tie.ex) {
     return [
       'I want ${p.object} back',
       'I cannot move on',
@@ -389,7 +278,7 @@ List<String> _whatsWrong(PersonRef p, Set<Tie> ties) {
       'Honestly, I am the one who ended it',
     ];
   }
-  if (ties.contains(Tie.want)) {
+  if (p.tie == Tie.want) {
     return [
       '${p.subjectCap} ${p.doesnt} know how I feel',
       '${p.subjectCap} ${p.isAre} with someone else',
@@ -399,11 +288,11 @@ List<String> _whatsWrong(PersonRef p, Set<Tie> ties) {
       'Honestly, I am not sure what I want',
     ];
   }
-  final children = ties.contains(Tie.children);
+  final children = p.tie == Tie.children;
   return [
     '${p.subjectCap} ${p.doesnt} listen to me',
     // A parent, a manager — not a friend, and not usually one's own children.
-    if (ties.any((t) => t == Tie.family || t == Tie.work || t == Tie.unknown))
+    if (const {Tie.family, Tie.work, Tie.unknown}.contains(p.tie))
       '${p.subjectCap} ${p.verb("decide")} things for me',
     if (children) "${p.subjectCap} ${p.doesnt} want to spend time with me",
     'Money is tangled up in it',
@@ -416,8 +305,8 @@ List<String> _whatsWrong(PersonRef p, Set<Tie> ties) {
   ];
 }
 
-List<String> _decisions(PersonRef p, Set<Tie> ties) {
-  if (ties.contains(Tie.partner)) {
+List<String> _decisions(PersonRef p) {
+  if (p.tie == Tie.partner) {
     return const [
       'Whether to end it',
       'Whether to say the thing I have not said',
@@ -427,7 +316,7 @@ List<String> _decisions(PersonRef p, Set<Tie> ties) {
       'Whether I am being unreasonable',
     ];
   }
-  if (ties.contains(Tie.ex)) {
+  if (p.tie == Tie.ex) {
     return const [
       'Whether to reach out',
       'Whether to try to get back together',
@@ -438,7 +327,7 @@ List<String> _decisions(PersonRef p, Set<Tie> ties) {
       'Whether I am being unreasonable',
     ];
   }
-  if (ties.contains(Tie.want)) {
+  if (p.tie == Tie.want) {
     return const [
       'Whether to make a move',
       'Whether to say the thing I have not said',
@@ -461,10 +350,7 @@ List<IntakeQuestion> _relationship(
   UserProfile profile,
   Map<String, String?> answers,
 ) {
-  final cast = castFrom(answers['rel_who']);
-  final who = cast.speak;
-  final ties = cast.ties;
-  final only = cast.isGroup ? null : who.tie;
+  final who = personFrom(answers['rel_who']);
   final decision = answers['rel_decision'];
 
   final noIdea = '${who.subjectCap} ${who.has} no idea';
@@ -478,10 +364,13 @@ List<IntakeQuestion> _relationship(
     IntakeQuestion(
       id: 'rel_who',
       text: 'Who is this about?',
-      helper: 'Pick everyone it involves — one word for each person.',
-      kind: IntakeAnswerKind.multiChoice,
+      // Single: one relationship per chat, because every question after this
+      // is worded about that one person. A situation with two people in it — a
+      // partner *and* their family — goes through "Something else", and the
+      // adaptive questions pick it up from what was written.
+      helper: 'Pick the one this is mainly about. If it is more than one '
+          'person, use "Something else".',
       options: _aboutWhomOptions(profile),
-      exclusiveGroups: const [_partnerTerms, _exTerms],
     ),
 
     // Multi-select because it is never one thing, and the options are specific
@@ -489,11 +378,11 @@ List<IntakeQuestion> _relationship(
     IntakeQuestion(
       id: 'rel_whats_wrong',
       text: 'What is actually going on with ${who.noun}?',
-      helper: only == Tie.partner
+      helper: who.isPartner
           ? 'Pick everything that is true. Most of this is never one thing.'
           : 'Pick everything that is true.',
       kind: IntakeAnswerKind.multiChoice,
-      options: _perPerson(cast, _whatsWrong),
+      options: _whatsWrong(who),
     ),
 
     IntakeQuestion(
@@ -502,12 +391,12 @@ List<IntakeQuestion> _relationship(
       // Single: one decision at a time, and whether "What is stopping you?"
       // follows depends on which.
       helper: 'Pick the main one.',
-      options: _perPerson(cast, _decisions),
+      options: _decisions(who),
     ),
 
     // "Going on" is wrong for something that is over, and "as long as I have
     // known them" is wrong for someone's own parents.
-    switch (only) {
+    switch (who.tie) {
       Tie.ex => const IntakeQuestion(
           id: 'rel_duration',
           text: 'How long ago did it end?',
@@ -538,7 +427,7 @@ List<IntakeQuestion> _relationship(
             'Weeks',
             'Months',
             'Years',
-            ties.every((t) => t == Tie.family || t == Tie.children)
+            who.tie == Tie.family || who.tie == Tie.children
                 ? 'For as long as I can remember'
                 : 'As long as I have known ${who.object}',
           ],
@@ -560,12 +449,12 @@ List<IntakeQuestion> _relationship(
         once,
         // Only for someone still in the user's life: an ex or someone they are
         // not with has no ongoing conversation to keep failing.
-        if (cast.hasOngoing) ...[
+        if (who.hasOngoing) ...[
           'We have talked many times and nothing changes',
           fight,
           saysFine,
         ],
-        if (ties.contains(Tie.ex)) 'We do not talk anymore',
+        if (who.tie == Tie.ex) 'We do not talk anymore',
       ],
       exclusiveGroups: [
         [noIdea, hinted, once, 'We have talked many times and nothing changes'],
@@ -587,23 +476,23 @@ List<IntakeQuestion> _relationship(
         helper: 'All of it, if that is the honest answer.',
         kind: IntakeAnswerKind.multiChoice,
         options: [
-          if (ties.contains(Tie.partner)) 'I do not want to be alone',
-          if (cast.hasOngoing) 'I would hurt ${who.object}',
+          if (who.tie == Tie.partner) 'I do not want to be alone',
+          if (who.hasOngoing) 'I would hurt ${who.object}',
           // An ex is already lost, and already walked away from.
-          if (ties.any((t) => t != Tie.ex)) 'I would lose ${who.object}',
-          if (ties.contains(Tie.ex)) ...[
+          if (!who.isEx) 'I would lose ${who.object}',
+          if (who.tie == Tie.ex) ...[
             'I might get hurt again',
             'It would mean admitting it is really over',
           ],
-          if (ties.contains(Tie.want)) ...[
+          if (who.tie == Tie.want) ...[
             '${who.subjectCap} might say no',
             'It could ruin what we have now',
           ],
           // Redundant when the family is who this is about.
-          if (!ties.contains(Tie.family))
+          if (who.tie != Tie.family)
             'My family would have something to say about it',
           'I would look like the bad one',
-          if (ties.any((t) => t != Tie.ex))
+          if (!who.isEx)
             'I have already put too much into this to walk away',
           'I might regret it',
           'Nothing would change anyway',

@@ -17,6 +17,7 @@ import 'package:thoughtloom/screens/history_screen.dart';
 import 'package:thoughtloom/screens/intake_flow_screen.dart';
 import 'package:thoughtloom/services/backend.dart';
 import 'package:thoughtloom/widgets/app_button.dart';
+import 'package:thoughtloom/widgets/option_tile.dart';
 
 /// Covers the dashboard and the per-category scripted opening: that picking a
 /// category opens a real chat row, that every question and answer lands in
@@ -369,8 +370,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.arrow_back_rounded));
       await tester.pumpAndSettle();
-      // rel_who is multi-select: untick her, then tick them.
-      await choose(tester, 'My girlfriend');
       await choose(tester, 'My parents or family');
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
@@ -846,16 +845,20 @@ void main() {
             isNot(contains('My family would have something to say about it')));
       });
 
-      test('a partner and family together get both sets, each named', () {
-        final both = about(
-            'My girlfriend${selectionSeparator}My parents or family');
-        final wrong = opts(both, 'rel_whats_wrong');
-        expect(wrong, contains("My girlfriend doesn't give me time"));
-        expect(wrong, contains("My family don't listen to me"));
-        expect(opts(both, 'rel_decision'), contains('Whether to end it'));
-        expect(opts(both, 'rel_fear'), contains('I do not want to be alone'));
-        expect(both.firstWhere((q) => q.id == 'rel_spoken').text,
+      test('more than one person is said in words, and the flow carries on',
+          () {
+        // Q1 is single-select; "my girlfriend and her parents" goes through
+        // "Something else". What follows is the broad, neutral set — worded
+        // about "them", never guessing which of the two a line is about.
+        final typed = about('My girlfriend and her parents');
+        expect(typed.firstWhere((q) => q.id == 'rel_whats_wrong').text,
+            'What is actually going on with them?');
+        expect(opts(typed, 'rel_whats_wrong'),
+            contains("They don't listen to me"));
+        expect(typed.firstWhere((q) => q.id == 'rel_spoken').text,
             'Have you told them?');
+        expect(typed.map((q) => q.id),
+            containsAll(['rel_decision', 'rel_duration', 'rel_fear']));
       });
 
       test('a typed answer falls back to the broad set, not a wrong one', () {
@@ -961,12 +964,12 @@ void main() {
       // And these take several for the same reason; the durations, deadlines,
       // and the one decision a chat is about stay single.
       const alsoMulti = {
-        ChatCategory.relationship: ['rel_who', 'rel_spoken', 'rel_fear'],
+        ChatCategory.relationship: ['rel_spoken', 'rel_fear'],
         ChatCategory.education: ['edu_geography'],
         ChatCategory.other: ['oth_area'],
       };
       const single = {
-        ChatCategory.relationship: ['rel_decision', 'rel_duration'],
+        ChatCategory.relationship: ['rel_who', 'rel_decision', 'rel_duration'],
         ChatCategory.education: ['edu_decision', 'edu_stage'],
         ChatCategory.financial: ['fin_decision', 'fin_scale', 'fin_urgency'],
         ChatCategory.other: ['oth_shape', 'oth_urgency'],
@@ -1016,19 +1019,22 @@ void main() {
       return picked;
     }
 
-    test('one word per ex, but an ex and the family together', () {
+    test('who it is about is one person, picked like the decision', () {
       // Every term on offer: a profile that declined the status question.
       final who = q(ChatCategory.relationship, 'rel_who');
-      expect(who.isMulti, isTrue);
-      expect(tap(who, ['My ex-girlfriend', 'My ex-boyfriend']),
-          {'My ex-boyfriend'});
-      expect(tap(who, ['My ex-partner', 'My parents or family']),
-          {'My ex-partner', 'My parents or family'});
-      // The same for the current partner — and a partner *and* an ex is a real
-      // situation, so those two stay independent.
-      expect(tap(who, ['My girlfriend', 'My wife']), {'My wife'});
-      expect(tap(who, ['My partner', 'My ex-partner', 'A close friend']),
-          {'My partner', 'My ex-partner', 'A close friend'});
+      expect(who.kind, IntakeAnswerKind.choice);
+      expect(who.exclusiveGroups, isEmpty);
+      expect(tap(who, ['Someone I am seeing', 'Someone I want to be with',
+          'My ex-boyfriend', 'My parents or family', 'My children']),
+          {'My children'}, reason: 'each tap replaces the last');
+      // Every option is still there.
+      expect(who.options, containsAll([
+        'My girlfriend', 'My boyfriend', 'My wife', 'My husband', 'My partner',
+        'My ex-girlfriend', 'My ex-boyfriend', 'My ex-wife', 'My ex-husband',
+        'My ex-partner', 'Someone I am seeing', 'Someone I want to be with',
+        'My parents or family', 'My children', 'A close friend',
+        'Someone at work',
+      ]));
     });
 
     test('the decision stays one decision', () {
@@ -1088,7 +1094,7 @@ void main() {
       // the one decision later questions depend on.
       const expected = {
         ChatCategory.relationship: {
-          'rel_who': true,
+          'rel_who': false,
           'rel_whats_wrong': true,
           'rel_decision': false,
           'rel_duration': false,
@@ -1123,22 +1129,50 @@ void main() {
       });
     });
 
-    testWidgets('on screen, ticking one ex-term unticks the other',
+    testWidgets('on screen, picking a second person replaces the first',
         (tester) async {
       final userId = await signInWithProfile(tester);
       await tapCategory(tester, ChatCategory.relationship);
 
       await choose(tester, 'My ex-girlfriend');
       await choose(tester, 'My parents or family');
-      await choose(tester, 'My ex-boyfriend');
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
 
       final chat = (await Backend.data.fetchChats(userId)).single;
       final row = (await Backend.data.fetchMessages(chat.id)).single;
-      expect(row.metadata['selected'],
-          ['My ex-boyfriend', 'My parents or family']);
+      expect(row.answerText, 'My parents or family');
+      expect(row.metadata['multi'], isFalse);
     });
+
+    // Circle for one answer, square for several — on every tile of every
+    // scripted question, "Something else" included, so no list mixes the two.
+    for (final category in ChatCategory.values) {
+      testWidgets('${category.label}: every tile has its question\'s shape',
+          (tester) async {
+        final userId = await signInWithProfile(tester);
+        await tapCategory(tester, category);
+        final profile = (await Backend.data.fetchProfile(userId))!;
+
+        final answers = <String, String?>{};
+        var questions = questionsFor(category, profile, answers);
+        for (var i = 0; i < questions.length; i++) {
+          final question = questions[i];
+          final want = question.isMulti ? ChoiceMode.multi : ChoiceMode.single;
+          final tiles = tester.widgetList<OptionTile>(find.byType(OptionTile));
+          if (question.isChoice) {
+            expect(tiles, hasLength(question.options.length + 1),
+                reason: '${question.id}: its options and "Something else"');
+          }
+          for (final tile in tiles) {
+            expect(tile.mode, want, reason: '${question.id} / ${tile.label}');
+          }
+          answers[question.id] = await answerCurrent(tester, question,
+              isLast: i == questions.length - 1);
+          questions = questionsFor(category, profile, answers);
+        }
+      });
+    }
   });
 
   group('question sets', () {
