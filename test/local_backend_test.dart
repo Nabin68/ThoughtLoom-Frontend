@@ -48,7 +48,6 @@ void main() {
       expect(result.needsEmailConfirmation, isFalse);
       expect(result.user.email, 'ada@example.com');
       expect(auth.currentUser?.id, result.user.id);
-      expect(auth.isSignedIn, isTrue);
     });
 
     test('a duplicate email is rejected regardless of case', () async {

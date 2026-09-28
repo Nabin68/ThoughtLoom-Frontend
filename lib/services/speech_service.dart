@@ -233,31 +233,3 @@ class PluginSpeechService implements SpeechService {
     _speech.cancel().catchError((_) {});
   }
 }
-
-/// A [SpeechService] that is never available.
-///
-/// What tests get, and what any platform without a recogniser effectively has.
-/// Callers hide the mic button when [initialize] returns false, so this is the
-/// "typing only" configuration.
-class NoSpeechService implements SpeechService {
-  @override
-  Future<bool> initialize() async => false;
-
-  @override
-  bool get isListening => false;
-
-  @override
-  Future<bool> listen({
-    required void Function(String transcript, bool isFinal) onResult,
-    required VoidCallback onSessionEnd,
-    VoidCallback? onAudio,
-    void Function(String message)? onFatalError,
-  }) async =>
-      false;
-
-  @override
-  Future<void> stop() async {}
-
-  @override
-  void dispose() {}
-}

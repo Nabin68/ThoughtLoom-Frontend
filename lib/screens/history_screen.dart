@@ -14,6 +14,7 @@ import '../widgets/app_card.dart';
 import '../widgets/app_header.dart';
 import '../widgets/app_loader.dart';
 import '../widgets/error_banner.dart';
+import '../widgets/rich_body.dart';
 import 'chat_transcript_screen.dart';
 import 'continued_chat_screen.dart';
 
@@ -498,7 +499,9 @@ class _ChatRow extends StatelessWidget {
                   if (excerpt != null) ...[
                     SizedBox(height: AppTheme.s2),
                     Text(
-                      excerpt,
+                      // A hit inside a recommendation would otherwise show its
+                      // ** and - markers verbatim.
+                      stripMarkdown(excerpt),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: AppTheme.meta(context).copyWith(

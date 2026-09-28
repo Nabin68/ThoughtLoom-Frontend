@@ -32,9 +32,6 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
   supabase_flutter: ^2.16.0
   shared_preferences: ^2.5.5
   crypto: ^3.0.7
@@ -96,7 +93,6 @@ flutter:
   assets:
     - assets/background.png
     - assets/logo.png
-    - assets/loading.jpeg
 
   # AppTheme has asked for Inter since Prompt 1, but nothing ever shipped it —
   # so every screen has silently been rendering in Roboto (Android) or SF (iOS).

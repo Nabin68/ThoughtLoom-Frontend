@@ -24,10 +24,6 @@ class AppTheme {
   /// Prompt 1 — it is the brand.
   static const Color primary = Color(0xFF6F8F9B);
 
-  /// Pressed states and emphasis. A darker sage rather than an opacity shift,
-  /// which over cream turns muddy rather than deeper.
-  static const Color primaryDeep = Color(0xFF56747F);
-
   /// A sage wash for tinted fills — selected chips, quiet highlights.
   static const Color primarySoft = Color(0xFFE4EBEE);
 

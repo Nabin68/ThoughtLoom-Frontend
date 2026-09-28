@@ -70,7 +70,10 @@ android {
             // With no key.properties this is null and the APK comes out
             // unsigned, which a device and Play both refuse outright — a
             // failure that cannot be mistaken for success.
+            // Without key.properties, the debug key — Flutter's own default — so a
+            // release APK for testers still installs. Play needs the real key.
             signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
 }

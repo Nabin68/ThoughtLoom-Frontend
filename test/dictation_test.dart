@@ -347,6 +347,22 @@ void main() {
       await dictation.stop();
     });
 
+    testWidgets('words keep a session alive when no sound levels arrive',
+        (tester) async {
+      // A recogniser that reports no levels, or a slow final on mobile data.
+      speech.micWorks = false;
+      await dictation.start();
+      for (final words in ['I', 'I am', 'I am tired', 'I am tired of this']) {
+        await tester.pump(const Duration(seconds: 2));
+        speech.hear(words);
+      }
+
+      expect(speech.sessions, 1, reason: 'never cut off mid-sentence');
+      expect(dictation.micLive, isTrue);
+      expect(field.text, 'I am tired of this');
+      await dictation.stop();
+    });
+
     testWidgets('the gap between sessions is only admitted if it lasts',
         (tester) async {
       // What the button would have drawn at each rebuild.

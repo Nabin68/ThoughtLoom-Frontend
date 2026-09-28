@@ -34,10 +34,6 @@ class SessionScope extends InheritedWidget {
     return scope!;
   }
 
-  /// Null above [AuthGate], or when signed out.
-  static SessionScope? maybeOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<SessionScope>();
-
   @override
   bool updateShouldNotify(SessionScope oldWidget) =>
       oldWidget.user != user ||

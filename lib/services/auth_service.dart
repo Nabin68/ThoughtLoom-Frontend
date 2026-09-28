@@ -39,8 +39,6 @@ abstract class AuthService {
   /// — [Backend.init] finishes restoring before the app builds.
   AuthUser? get currentUser;
 
-  bool get isSignedIn => currentUser != null;
-
   /// The bearer token for calls to our own API, refreshed if it is about to
   /// expire. Null when signed out, and always null on the on-device backend —
   /// which has no server to prove anything to.

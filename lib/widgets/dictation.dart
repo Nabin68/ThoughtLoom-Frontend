@@ -290,6 +290,11 @@ class DictationController extends ChangeNotifier {
   ///    that erased the first sentence — the bug a pause used to cause. See
   ///    [_isNewUtterance].
   void _write(String transcript, bool isFinal) {
+    // Words are proof the mic is live, as much as a sound level is. Some
+    // recognisers report no levels at all, and none do while a slow connection
+    // returns the final — without this the watchdog cut those sessions off
+    // mid-sentence and dropped the final as a straggler.
+    _onAudio();
     transcript = transcript.trim();
     if (transcript.isEmpty) return;
     if (!_baseTaken) {
