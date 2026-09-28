@@ -23,9 +23,16 @@ class FakeSpeech implements SpeechService {
   /// microphone on across a pause *is* opening another one.
   int sessions = 0;
 
+  /// Whether an opened session actually records — produces sound-level
+  /// readings. False is the on-device bug: a session the plugin reports as
+  /// listening while the microphone never opens.
+  bool micWorks = true;
+
   bool _listening = false;
   void Function(String, bool)? _onResult;
   VoidCallback? _onSessionEnd;
+  VoidCallback? _onAudio;
+  void Function(String)? _onFatalError;
 
   @override
   Future<bool> initialize() async => available;
@@ -37,12 +44,17 @@ class FakeSpeech implements SpeechService {
   Future<bool> listen({
     required void Function(String transcript, bool isFinal) onResult,
     required VoidCallback onSessionEnd,
+    VoidCallback? onAudio,
+    void Function(String message)? onFatalError,
   }) async {
     if (!available) return false;
     sessions++;
     _onResult = onResult;
     _onSessionEnd = onSessionEnd;
+    _onAudio = onAudio;
+    _onFatalError = onFatalError;
     _listening = true;
+    if (micWorks) onAudio?.call();
     return true;
   }
 
@@ -56,6 +68,15 @@ class FakeSpeech implements SpeechService {
 
   /// The recogniser reporting what it has heard so far.
   void hear(String transcript) => _onResult?.call(transcript, false);
+
+  /// A sound-level reading: the microphone is capturing.
+  void audio() => _onAudio?.call();
+
+  /// An error no retry fixes, e.g. no network.
+  void fatal(String message) => _onFatalError?.call(message);
+
+  /// The recogniser committing to the current utterance.
+  void hearFinal(String transcript) => _onResult?.call(transcript, true);
 
   /// The recogniser closing the session itself — a pause, or its window
   /// expiring. This is the event the old code could not see.
@@ -135,6 +156,55 @@ void main() {
     expect(field.text, 'I am tired and my head hurts');
   });
 
+  test('a pause inside one session extends the text, never restarts it',
+      () async {
+    // The on-device bug. Android's recogniser starts a new utterance after a
+    // short pause *without* closing the session, and its next result starts
+    // over — "and", not "I am tired and". Written over the old base, that
+    // erased the first sentence.
+    await dictation.start();
+    speech.hear('I am');
+    speech.hear('I am tired');
+    speech.hear('and');
+    speech.hear('and my head');
+    speech.hear('and my head hurts');
+
+    expect(field.text, 'I am tired and my head hurts');
+    expect(speech.sessions, 1, reason: 'all of this was one session');
+  });
+
+  test('a restart that begins with the same word is still a restart',
+      () async {
+    await dictation.start();
+    speech.hear('I am tired');
+    speech.hear('I');
+    speech.hear('I also cannot sleep');
+
+    expect(field.text, 'I am tired I also cannot sleep');
+  });
+
+  test('a final result is kept, and what follows it is appended', () async {
+    await dictation.start();
+    speech.hear('I am tired');
+    speech.hearFinal('I am tired.');
+    speech.hear('I cannot sleep');
+    speech.hearFinal('I cannot sleep.');
+
+    expect(field.text, 'I am tired. I cannot sleep.');
+  });
+
+  test('partial results revise the utterance rather than piling up', () async {
+    // The opposite failure: treating every partial as new would write
+    // "I I am I am tired".
+    await dictation.start();
+    speech.hear('I');
+    speech.hear('I am');
+    speech.hear('I am tyred');
+    speech.hear('I am tired of');
+
+    expect(field.text, 'I am tired of');
+  });
+
   test('it extends what was typed, so speech and the keyboard are one input',
       () async {
     field.text = 'Honestly,';
@@ -199,6 +269,8 @@ void main() {
 
     expect(dictation.listening, isFalse);
     expect(speech.sessions, 3, reason: 'it gave up rather than opening a fourth');
+    // And says so, rather than just going dark.
+    expect(dictation.problem, 'Stopped after a long silence');
   });
 
   test('hearing something resets the patience', () async {
@@ -228,6 +300,99 @@ void main() {
 
     // Better to say so than to sit lit over a microphone that is not running.
     expect(dictation.listening, isFalse);
+    expect(dictation.problem, isNotNull);
+  });
+
+  group('the button tells the truth about the microphone', () {
+    // testWidgets for its fake clock: these are about timeouts.
+
+    testWidgets('live only once audio actually arrives', (tester) async {
+      speech.micWorks = false;
+      await dictation.start();
+      expect(dictation.listening, isTrue);
+      expect(dictation.micLive, isFalse, reason: 'asked for, not recording');
+
+      speech.audio();
+      expect(dictation.micLive, isTrue);
+      await dictation.stop();
+    });
+
+    testWidgets('a session that never records is retried, then reported',
+        (tester) async {
+      // The on-device bug: "Listening" on screen, no mic indicator on the phone,
+      // and nothing ever captured.
+      speech.micWorks = false;
+      await dictation.start();
+
+      await tester.pump(const Duration(seconds: 3));
+      expect(speech.sessions, greaterThan(1), reason: 'retried, not left dead');
+      expect(dictation.listening, isTrue);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(dictation.listening, isFalse, reason: 'gave up after three tries');
+      expect(dictation.problem, contains('would not start'));
+    });
+
+    testWidgets('a session that goes quiet without ending is restarted',
+        (tester) async {
+      await dictation.start();
+      speech.hear('I am tired');
+      expect(speech.sessions, 1);
+
+      // No readings and no session end: the recogniser died without saying so.
+      await tester.pump(const Duration(seconds: 4));
+      expect(speech.sessions, 2);
+      expect(dictation.listening, isTrue);
+      expect(field.text, 'I am tired', reason: 'nothing lost in the restart');
+      await dictation.stop();
+    });
+
+    testWidgets('the gap between sessions is only admitted if it lasts',
+        (tester) async {
+      // What the button would have drawn at each rebuild.
+      final shown = <bool>[];
+      speech.micWorks = false;
+      await dictation.start();
+      speech.audio();
+      dictation.addListener(() => shown.add(dictation.micLive));
+
+      speech.endSession(); // Android's end of an utterance.
+      await tester.pump(const Duration(milliseconds: 100));
+      speech.audio(); // The next session recording, quickly.
+      await tester.pump(const Duration(seconds: 1));
+      expect(dictation.micLive, isTrue);
+      expect(shown, isNot(contains(false)),
+          reason: 'a healthy restart never draws "Starting the mic…"');
+      await dictation.stop();
+    });
+
+    testWidgets('a gap that lasts is admitted', (tester) async {
+      final shown = <bool>[];
+      speech.micWorks = false;
+      await dictation.start();
+      speech.audio();
+      dictation.addListener(() => shown.add(dictation.micLive));
+
+      speech.endSession();
+      await tester.pump(const Duration(seconds: 1));
+      expect(shown, contains(false));
+      expect(dictation.listening, isTrue, reason: 'still trying');
+      await dictation.stop();
+    });
+
+    testWidgets('an error no retry fixes turns it off and says why',
+        (tester) async {
+      await dictation.start();
+      speech.fatal('Dictation needs an internet connection');
+
+      expect(dictation.listening, isFalse);
+      expect(dictation.problem, 'Dictation needs an internet connection');
+
+      // And tapping again clears it.
+      await dictation.start();
+      expect(dictation.problem, isNull);
+      await dictation.stop();
+    });
   });
 
   test('usedDictation records how the text got there, for the API', () async {

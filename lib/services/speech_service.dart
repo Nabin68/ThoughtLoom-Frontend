@@ -42,10 +42,22 @@ abstract class SpeechService {
   /// [onSessionEnd] fires exactly once, when this session is over for any
   /// reason — pause, timeout, error, or [stop].
   ///
+  /// [onAudio] fires on every sound-level reading, which the recogniser only
+  /// produces while the microphone is really capturing. It is the one honest
+  /// signal that the mic is live: the plugin reports "listening" the moment it
+  /// *asks* for a session, before (and whether or not) recording starts.
+  ///
+  /// [onFatalError] is for failures a retry cannot fix — no permission, no
+  /// network, no language pack — with a short message fit for the mic button.
+  /// It can arrive after [onSessionEnd], because the plugin reports the status
+  /// change before the error behind it.
+  ///
   /// Returns whether the session actually started.
   Future<bool> listen({
     required void Function(String transcript, bool isFinal) onResult,
     required VoidCallback onSessionEnd,
+    VoidCallback? onAudio,
+    void Function(String message)? onFatalError,
   });
 
   Future<void> stop();
@@ -63,6 +75,10 @@ class PluginSpeechService implements SpeechService {
   /// session arrives on the listener registered at [initialize], not on the
   /// call that started it.
   VoidCallback? _onSessionEnd;
+
+  /// The latest listen's fatal-error callback. Kept past the session's end —
+  /// see [SpeechService.listen] — and dropped only by [stop] or [dispose].
+  void Function(String message)? _onFatalError;
 
   /// Which session is current. Bumped when one ends, so a result the plugin
   /// emits on the way out cannot be attributed to the session after it.
@@ -88,6 +104,8 @@ class PluginSpeechService implements SpeechService {
           // pauses to think, `error_speech_timeout` on a quiet room. They end
           // the session; they are not failures worth showing anyone.
           debugPrint('ThoughtLoom: dictation error — $e');
+          final fatal = _fatalMessage(e.errorMsg);
+          if (fatal != null) _onFatalError?.call(fatal);
           _endSession();
         },
         onStatus: (status) {
@@ -112,6 +130,26 @@ class PluginSpeechService implements SpeechService {
     return _available;
   }
 
+  /// A message for an error no retry will fix, or null for the ordinary ones.
+  ///
+  /// `error_no_match` / `error_speech_timeout` are silence, and `error_busy` /
+  /// `error_client` are the recogniser not being ready for an immediate
+  /// restart — both are the controller's to retry.
+  static String? _fatalMessage(String error) => switch (error) {
+        'error_permission' => 'Microphone permission is off',
+        'error_network' ||
+        'error_network_timeout' ||
+        'error_server' ||
+        'error_server_disconnected' =>
+          'Dictation needs an internet connection',
+        'error_language_not_supported' ||
+        'error_language_unavailable' =>
+          'Dictation is not available in your language',
+        'error_audio_error' => 'The microphone stopped working',
+        'error_too_many_requests' => 'Dictation is busy — try again shortly',
+        _ => null,
+      };
+
   /// Fires the current session's end callback, once, and retires the session.
   void _endSession() {
     final callback = _onSessionEnd;
@@ -125,6 +163,8 @@ class PluginSpeechService implements SpeechService {
   Future<bool> listen({
     required void Function(String transcript, bool isFinal) onResult,
     required VoidCallback onSessionEnd,
+    VoidCallback? onAudio,
+    void Function(String message)? onFatalError,
   }) async {
     if (!await initialize()) return false;
 
@@ -134,25 +174,34 @@ class PluginSpeechService implements SpeechService {
 
     final session = ++_session;
     _onSessionEnd = onSessionEnd;
+    _onFatalError = onFatalError;
     try {
       await _speech.listen(
         onResult: (result) {
           if (session != _session) return; // A straggler from a closed session.
           onResult(result.recognizedWords, result.finalResult);
         },
+        onSoundLevelChange: (_) {
+          if (session == _session) onAudio?.call();
+        },
         listenOptions: stt.SpeechListenOptions(
           // Interim results are what make dictation feel alive rather than
           // frozen; the field shows them as they land.
           partialResults: true,
+          listenMode: stt.ListenMode.dictation,
           // False, deliberately. A no-match from a two-second silence is not an
           // error worth tearing the session down for — and when it genuinely is
-          // over, onError ends the session anyway. Cancelling on error is what
-          // made a thinking pause look like the mic breaking.
+          // over, onError ends the session anyway.
           cancelOnError: false,
-          // Generous: someone describing a problem they have chewed on for
-          // months will stop mid-sentence, and the defaults cut them off.
           listenFor: const Duration(minutes: 2),
-          pauseFor: const Duration(seconds: 5),
+          // No pauseFor, deliberately. On Android the plugin passes it to the
+          // recogniser as its silence length *and* waits that long after the
+          // recogniser's end-of-speech before reporting the session over. But
+          // Android turns the microphone off at end-of-speech — so with the old
+          // five seconds, every pause left the button saying "Listening" over a
+          // dead mic for five seconds, and whatever was said then was lost.
+          // Without it the session reports its end about a second after speech
+          // stops, and DictationController opens the next one straight away.
         ),
       );
       return true;
@@ -165,6 +214,7 @@ class PluginSpeechService implements SpeechService {
 
   @override
   Future<void> stop() async {
+    _onFatalError = null;
     try {
       await _speech.stop();
     } catch (e) {
@@ -178,6 +228,7 @@ class PluginSpeechService implements SpeechService {
   @override
   void dispose() {
     _onSessionEnd = null;
+    _onFatalError = null;
     // Best-effort: the screen is going away regardless.
     _speech.cancel().catchError((_) {});
   }
@@ -199,6 +250,8 @@ class NoSpeechService implements SpeechService {
   Future<bool> listen({
     required void Function(String transcript, bool isFinal) onResult,
     required VoidCallback onSessionEnd,
+    VoidCallback? onAudio,
+    void Function(String message)? onFatalError,
   }) async =>
       false;
 
