@@ -45,6 +45,17 @@ class IntakeQuestion {
   final IconData? icon;
   final int maxLines;
 
+  /// On a multi-select, sets of options that cannot be true together — at most
+  /// one of each is ever ticked. "My ex-girlfriend" and "My ex-boyfriend" are
+  /// two words for the one ex, not two people. An option may sit in several
+  /// groups; ticking it unticks anything it shares a group with.
+  final List<List<String>> exclusiveGroups;
+
+  /// On a multi-select, options that rule out every other: "Nobody but me",
+  /// "Not sure yet". Ticking one clears the rest, and ticking anything else
+  /// clears it.
+  final List<String> soloOptions;
+
   const IntakeQuestion({
     required this.id,
     required this.text,
@@ -55,12 +66,31 @@ class IntakeQuestion {
     this.hint,
     this.icon,
     this.maxLines = 1,
+    this.exclusiveGroups = const [],
+    this.soloOptions = const [],
   });
 
   bool get isChoice =>
       kind == IntakeAnswerKind.choice || kind == IntakeAnswerKind.multiChoice;
 
   bool get isMulti => kind == IntakeAnswerKind.multiChoice;
+
+  bool _conflict(String a, String b) =>
+      soloOptions.contains(a) ||
+      soloOptions.contains(b) ||
+      exclusiveGroups.any((g) => g.contains(a) && g.contains(b));
+
+  /// What is ticked after tapping [option], given [picked] before. The one place
+  /// the rules above are applied, so the screen and the tests cannot disagree.
+  Set<String> toggle(Set<String> picked, String option) {
+    if (!isMulti) return {option};
+    if (picked.contains(option)) return {...picked}..remove(option);
+    return {
+      for (final p in picked)
+        if (!_conflict(p, option)) p,
+      option,
+    };
+  }
 }
 
 /// How a multi-select answer is written to `answer_text`.

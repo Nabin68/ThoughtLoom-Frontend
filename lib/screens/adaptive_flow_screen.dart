@@ -319,6 +319,8 @@ class _AdaptiveFlowScreenState extends State<AdaptiveFlowScreen> {
           OptionTile(
             label: 'Something else — let me explain',
             selected: _writingOwnAnswer,
+            // Same mark as the rows above — see IntakeFlowScreen.
+            mode: multi ? ChoiceMode.multi : ChoiceMode.single,
             onTap: () => setState(() {
               _writingOwnAnswer = true;
               _choices.clear();

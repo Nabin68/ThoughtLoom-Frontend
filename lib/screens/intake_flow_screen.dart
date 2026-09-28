@@ -161,21 +161,14 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
   void _select(String option) {
     setState(() {
       _writingOwnAnswer = false;
-      if (_question.isMulti) {
-        // Ticking is a toggle; the last tick can be removed, and the Continue
-        // button simply goes inert. Nothing here forces an answer the user does
-        // not have.
-        _choices.contains(option)
-            ? _choices.remove(option)
-            : _choices.add(option);
-      } else {
-        // Selecting does not auto-advance: an accidental tap on a mis-read
-        // option would otherwise be committed before the user finished reading
-        // it.
-        _choices
-          ..clear()
-          ..add(option);
-      }
+      // Ticking is a toggle, and ticking one of a mutually exclusive pair
+      // unticks the other — see IntakeQuestion.toggle. Selecting never
+      // auto-advances: an accidental tap on a mis-read option would otherwise
+      // be committed before the user finished reading it.
+      final next = _question.toggle(_choices, option);
+      _choices
+        ..clear()
+        ..addAll(next);
     });
   }
 
@@ -420,6 +413,11 @@ class _IntakeFlowScreenState extends State<IntakeFlowScreen> {
                     OptionTile(
                       label: 'Something else — let me explain',
                       selected: _writingOwnAnswer,
+                      // Same mark as the rows above it. A radio at the foot of a
+                      // list of checkboxes reads as "this question is one answer".
+                      mode: _question.isMulti
+                          ? ChoiceMode.multi
+                          : ChoiceMode.single,
                       enabled: !_saving,
                       onTap: () => setState(() {
                         _writingOwnAnswer = true;

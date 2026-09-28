@@ -223,7 +223,9 @@ void main() {
       // The earlier answer is still selected, not lost.
       expect(find.text(first.text), findsOneWidget);
 
-      // Change it and go forward again.
+      // Change it and go forward again. oth_area is multi-select, so the old
+      // tick comes off first.
+      await choose(tester, first.options.first);
       await choose(tester, first.options[1]);
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
@@ -367,6 +369,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.arrow_back_rounded));
       await tester.pumpAndSettle();
+      // rel_who is multi-select: untick her, then tick them.
+      await choose(tester, 'My girlfriend');
       await choose(tester, 'My parents or family');
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
@@ -418,6 +422,10 @@ void main() {
       // be split on "; " or read back later as several ticked options.
       expect(messages.single.metadata.containsKey('selected'), isFalse);
       expect(messages.single.metadata.containsKey('options'), isFalse);
+
+      // And the flow carries on from it, into the broad option set rather than
+      // a narrow guess about who "my cousin" is.
+      expect(find.text('What is actually going on with them?'), findsOneWidget);
 
       // Stepping back restores the free text, rather than showing the
       // question as unanswered because nothing matched a fixed option.
@@ -649,9 +657,38 @@ void main() {
       );
       expect(whoOptions(status: 'In a long-term relationship').first,
           'My partner');
+      // Divorced means an ex-spouse first — the bug where a divorced man was
+      // only ever offered "My ex-girlfriend".
       expect(whoOptions(status: 'Separated or divorced', gender: 'Man').first,
-          'My ex-girlfriend');
-      expect(whoOptions(status: 'Separated or divorced').first, 'My ex');
+          'My ex-wife');
+      expect(whoOptions(status: 'Separated or divorced').first, 'My ex-partner');
+
+      // Every term is offered whatever the asker's gender; gender only orders.
+      final married = whoOptions(status: 'Married', gender: 'Man');
+      expect(married, containsAll(['My wife', 'My husband', 'My partner']));
+      final divorced = whoOptions(status: 'Separated or divorced', gender: 'Man');
+      expect(
+          divorced,
+          containsAll([
+            'My ex-wife',
+            'My ex-husband',
+            'My ex-girlfriend',
+            'My ex-boyfriend',
+            'My ex-partner',
+          ]));
+      final dating = whoOptions(status: 'Seeing someone', gender: 'Woman');
+      expect(dating,
+          containsAll(['My boyfriend', 'My girlfriend', 'My partner']));
+
+      // Children are a real option now — except for someone under 18.
+      expect(whoOptions(), contains('My children'));
+      expect(
+        questionsFor(ChatCategory.relationship,
+                profileWith(const {'age_range': 'Under 18'}))
+            .first
+            .options,
+        isNot(contains('My children')),
+      );
 
       // Neither onboarding question is ever asked again.
       final questions =
@@ -706,6 +743,210 @@ void main() {
           contains('I do not want to be alone'));
     });
 
+    group('every later relationship option fits who Q1 named', () {
+      final profile = profileWith(const {});
+      List<IntakeQuestion> about(String who, [String? decision]) =>
+          questionsFor(ChatCategory.relationship, profile, {
+            'rel_who': who,
+            if (decision != null) 'rel_decision': decision,
+          });
+      List<String> opts(List<IntakeQuestion> qs, String id) =>
+          qs.firstWhere((q) => q.id == id).options;
+
+      test('every rel_who option is understood by personFrom', () {
+        // Reword an option without teaching personFrom and this fails, rather
+        // than the flow quietly calling a girlfriend "them".
+        final all = questionsFor(ChatCategory.relationship, profile)
+            .first
+            .options;
+        for (final option in all) {
+          expect(personFrom(option).tie, isNot(Tie.unknown), reason: option);
+        }
+      });
+
+      test('an ex is asked about in the past tense', () {
+        final ex = about('My ex-girlfriend');
+        final wrong = opts(ex, 'rel_whats_wrong');
+        expect(wrong, containsAll(['I want her back', 'I cannot move on',
+            'She is with someone new', 'We still talk sometimes',
+            'I do not know why it ended']));
+        expect(wrong, isNot(contains("She doesn't give me time")));
+        expect(wrong, isNot(contains('She has been pulling away')));
+        expect(wrong, isNot(contains('Honestly, I am the one who has checked out')));
+
+        final decide = opts(ex, 'rel_decision');
+        expect(decide, containsAll(['Whether to reach out',
+            'Whether to try to get back together', 'Whether to cut contact',
+            'Whether to move on']));
+        expect(decide, isNot(contains('Whether to end it')));
+        expect(decide, isNot(contains('Whether to commit further')));
+
+        expect(ex.firstWhere((q) => q.id == 'rel_duration').text,
+            'How long ago did it end?');
+
+        final spoken = opts(ex, 'rel_spoken');
+        expect(spoken, contains('We do not talk anymore'));
+        expect(spoken, isNot(contains('It turns into a fight every time')));
+        expect(spoken, isNot(contains('She says it is fine and it is not')));
+        expect(spoken,
+            isNot(contains('We have talked many times and nothing changes')));
+
+        final fear = opts(ex, 'rel_fear');
+        expect(fear, isNot(contains('I do not want to be alone')));
+        expect(fear, isNot(contains('I would lose her')));
+        expect(fear,
+            isNot(contains('I have already put too much into this to walk away')));
+      });
+
+      test('an ex-husband is he, an ex-partner is they', () {
+        expect(about('My ex-husband').firstWhere((q) => q.id == 'rel_spoken').text,
+            'Have you told him?');
+        expect(opts(about('My ex-partner'), 'rel_whats_wrong'),
+            contains('They are with someone new'));
+        expect(opts(about('My wife'), 'rel_whats_wrong'),
+            contains("She doesn't give me time"));
+      });
+
+      test('someone they want to be with is not a relationship to end', () {
+        final want = about('Someone I want to be with');
+        final wrong = opts(want, 'rel_whats_wrong');
+        expect(wrong, containsAll(["They don't know how I feel",
+            'They are with someone else', 'I do not know if it is mutual']));
+        expect(wrong, isNot(contains("They don't give me time")));
+        expect(wrong, isNot(contains('They have been pulling away')));
+
+        final decide = opts(want, 'rel_decision');
+        expect(decide, containsAll(['Whether to make a move', 'Whether to give up']));
+        expect(decide, isNot(contains('Whether to end it')));
+        expect(decide, isNot(contains('Whether to commit further')));
+
+        expect(opts(want, 'rel_spoken'),
+            isNot(contains('It turns into a fight every time')));
+        expect(opts(want, 'rel_fear'), isNot(contains('I do not want to be alone')));
+      });
+
+      test('"what is stopping you" only follows a step, not a reflection', () {
+        bool asksFear(String decision) => about('My girlfriend', decision)
+            .any((q) => q.id == 'rel_fear');
+        expect(asksFear('Whether I am being unreasonable'), isFalse);
+        expect(asksFear('Whether to give it more time'), isFalse);
+        expect(asksFear('Whether to end it'), isTrue);
+        // A typed decision could be either, so the question stays.
+        expect(asksFear('whether to propose on her birthday'), isTrue);
+      });
+
+      test('Q4 names the person the way the rest of the flow does', () {
+        expect(opts(about('My girlfriend'), 'rel_duration'),
+            contains('As long as I have known her'));
+        expect(opts(about('My boyfriend'), 'rel_duration'),
+            contains('As long as I have known him'));
+        expect(opts(about('My parents or family'), 'rel_duration'),
+            contains('For as long as I can remember'));
+        expect(opts(about('My parents or family'), 'rel_fear'),
+            isNot(contains('My family would have something to say about it')));
+      });
+
+      test('a partner and family together get both sets, each named', () {
+        final both = about(
+            'My girlfriend${selectionSeparator}My parents or family');
+        final wrong = opts(both, 'rel_whats_wrong');
+        expect(wrong, contains("My girlfriend doesn't give me time"));
+        expect(wrong, contains("My family don't listen to me"));
+        expect(opts(both, 'rel_decision'), contains('Whether to end it'));
+        expect(opts(both, 'rel_fear'), contains('I do not want to be alone'));
+        expect(both.firstWhere((q) => q.id == 'rel_spoken').text,
+            'Have you told them?');
+      });
+
+      test('a typed answer falls back to the broad set, not a wrong one', () {
+        final typed = about('My cousin, sort of raised me');
+        expect(typed.firstWhere((q) => q.id == 'rel_whats_wrong').text,
+            'What is actually going on with them?');
+        expect(opts(typed, 'rel_whats_wrong'), contains("They don't listen to me"));
+      });
+    });
+
+    test('education hides options its decision rules out', () {
+      final p = profileWith(const {
+        'education_level': 'Partway through an undergraduate degree',
+      }, location: 'Pune, India');
+      List<IntakeQuestion> after(String decision) =>
+          questionsFor(ChatCategory.education, p, {'edu_decision': decision});
+      List<String> obstacles(String d) =>
+          after(d).firstWhere((q) => q.id == 'edu_obstacle').options;
+
+      expect(obstacles('Whether to take a break from it'),
+          isNot(contains('I might not get in')));
+      expect(obstacles('Whether to take a break from it'),
+          contains('I would fall behind'));
+      expect(obstacles('Whether to stay on it'),
+          contains('I am struggling with the course itself'));
+      expect(obstacles('What to do once it finishes'),
+          contains('I might not get in'));
+      expect(after('Whether to stay on it').any((q) => q.id == 'edu_geography'),
+          isFalse);
+      expect(after('What to do once it finishes')
+          .any((q) => q.id == 'edu_geography'), isTrue);
+      expect(after('Whether to stay on it').last.options,
+          contains('Thought it through, still torn'));
+    });
+
+    test('financial options follow the decision and the profile', () {
+      List<IntakeQuestion> after(String decision, [Map<String, dynamic>? a]) =>
+          questionsFor(ChatCategory.financial, profileWith(a ?? const {}),
+              {'fin_decision': decision});
+      List<String> blockers(String d) =>
+          after(d).firstWhere((q) => q.id == 'fin_blocker').options;
+
+      const cost = 'Saying no would cost me the relationship';
+      expect(blockers('Money I would be giving someone else'), contains(cost));
+      for (final d in [
+        'Saving or investing',
+        'Earning more — a raise, a switch, a side income',
+        'Money someone owes me',
+        'Making what I have stretch',
+      ]) {
+        expect(blockers(d), isNot(contains(cost)), reason: d);
+      }
+      expect(blockers('Money someone owes me'),
+          contains('Asking for it back could cost me the relationship'));
+
+      expect(after('Making what I have stretch')
+          .firstWhere((q) => q.id == 'fin_scale').text,
+          'Roughly how short are you?');
+
+      // No partner for someone single, no children for someone under 18.
+      final stakeholders = after('A big purchase', const {
+        'living_situation': 'With my parents or family',
+        'relationship_status': 'Single',
+        'age_range': 'Under 18',
+      }).firstWhere((q) => q.id == 'fin_stakeholders').options;
+      expect(stakeholders, isNot(contains('My partner')));
+      expect(stakeholders, isNot(contains('My children')));
+
+      // Someone deciding alone is still asked when the money goes to someone.
+      final alone = after('Money I would be giving someone else', const {
+        'living_situation': 'On my own',
+        'relationship_status': 'Single',
+        'financial_context': 'I support myself',
+      });
+      expect(alone.firstWhere((q) => q.id == 'fin_stakeholders').options.first,
+          'The person I would give it to');
+    });
+
+    test('other hides "admitting I was wrong" for starting something new', () {
+      List<String> blockers(String shape) =>
+          questionsFor(ChatCategory.other, profileWith(const {}),
+                  {'oth_shape': shape})
+              .last
+              .options;
+      const wrong = 'It would mean admitting I was wrong before';
+      expect(blockers('Whether to start something'), isNot(contains(wrong)));
+      expect(blockers('Whether to stop something'), contains(wrong));
+      expect(blockers('Whether to tell someone something'),
+          contains('I do not know how they would react'));
+    });
+
     test('the honest answer to several of these is more than one thing', () {
       // The complaint this exists for: every one of these was a single-select,
       // so someone who was tired *and* unheard *and* frightened of saying so had
@@ -717,12 +958,186 @@ void main() {
         ChatCategory.other: 'oth_blocker',
       };
 
+      // And these take several for the same reason; the durations, deadlines,
+      // and the one decision a chat is about stay single.
+      const alsoMulti = {
+        ChatCategory.relationship: ['rel_who', 'rel_spoken', 'rel_fear'],
+        ChatCategory.education: ['edu_geography'],
+        ChatCategory.other: ['oth_area'],
+      };
+      const single = {
+        ChatCategory.relationship: ['rel_decision', 'rel_duration'],
+        ChatCategory.education: ['edu_decision', 'edu_stage'],
+        ChatCategory.financial: ['fin_decision', 'fin_scale', 'fin_urgency'],
+        ChatCategory.other: ['oth_shape', 'oth_urgency'],
+      };
+      alsoMulti.forEach((category, ids) {
+        for (final q in questionsFor(category, profileWith(const {}))
+            .where((q) => ids.contains(q.id))) {
+          expect(q.isMulti, isTrue, reason: q.id);
+        }
+      });
+      single.forEach((category, ids) {
+        for (final q in questionsFor(category, profileWith(const {}))
+            .where((q) => ids.contains(q.id))) {
+          expect(q.kind, IntakeAnswerKind.choice, reason: q.id);
+        }
+      });
+
       multi.forEach((category, id) {
         final question = questionsFor(category, profileWith(const {}))
             .firstWhere((q) => q.id == id);
         expect(question.isMulti, isTrue, reason: '$id should take several');
         expect(question.kind, IntakeAnswerKind.multiChoice);
       });
+    });
+  });
+
+  group('which options can be ticked together', () {
+    UserProfile profileWith(Map<String, dynamic> answers, {String? location}) =>
+        UserProfile.empty('u').copyWith(
+          location: location,
+          onboardingAnswers: answers,
+        );
+    IntakeQuestion q(ChatCategory c, String id,
+            {Map<String, dynamic> profile = const {},
+            Map<String, String?> answers = const {},
+            String? location}) =>
+        questionsFor(c, profileWith(profile, location: location), answers)
+            .firstWhere((q) => q.id == id);
+
+    /// Taps [taps] in order, as a user would, and returns what is ticked.
+    Set<String> tap(IntakeQuestion question, List<String> taps) {
+      var picked = <String>{};
+      for (final t in taps) {
+        expect(question.options, contains(t), reason: t);
+        picked = question.toggle(picked, t);
+      }
+      return picked;
+    }
+
+    test('one word per ex, but an ex and the family together', () {
+      // Every term on offer: a profile that declined the status question.
+      final who = q(ChatCategory.relationship, 'rel_who');
+      expect(who.isMulti, isTrue);
+      expect(tap(who, ['My ex-girlfriend', 'My ex-boyfriend']),
+          {'My ex-boyfriend'});
+      expect(tap(who, ['My ex-partner', 'My parents or family']),
+          {'My ex-partner', 'My parents or family'});
+      // The same for the current partner — and a partner *and* an ex is a real
+      // situation, so those two stay independent.
+      expect(tap(who, ['My girlfriend', 'My wife']), {'My wife'});
+      expect(tap(who, ['My partner', 'My ex-partner', 'A close friend']),
+          {'My partner', 'My ex-partner', 'A close friend'});
+    });
+
+    test('the decision stays one decision', () {
+      final decide = q(ChatCategory.relationship, 'rel_decision',
+          answers: {'rel_who': 'My girlfriend'});
+      expect(decide.kind, IntakeAnswerKind.choice);
+      expect(tap(decide, ['Whether to end it', 'Whether to commit further']),
+          {'Whether to commit further'});
+    });
+
+    test('how far a conversation got is one answer inside a multi-select', () {
+      final spoken = q(ChatCategory.relationship, 'rel_spoken',
+          answers: {'rel_who': 'My girlfriend'});
+      expect(
+          tap(spoken, [
+            'We talked once and nothing changed',
+            'We have talked many times and nothing changes',
+          ]),
+          {'We have talked many times and nothing changes'});
+      expect(
+          tap(spoken, [
+            'We have talked many times and nothing changes',
+            'It turns into a fight every time',
+            'She says it is fine and it is not',
+          ]),
+          hasLength(3));
+      expect(
+          tap(spoken, ['It turns into a fight every time', 'She has no idea']),
+          {'She has no idea'});
+
+      final ex = q(ChatCategory.relationship, 'rel_spoken',
+          answers: {'rel_who': 'My ex-wife'});
+      expect(tap(ex, ['She has no idea', 'We do not talk anymore']),
+          hasLength(2), reason: 'never told her, and no longer in touch');
+    });
+
+    test('"anywhere" and "not sure" rule out specific places', () {
+      final geo = q(ChatCategory.education, 'edu_geography',
+          location: 'Pune, India');
+      expect(tap(geo, ['Staying in Pune, India', 'Abroad']), hasLength(2));
+      expect(tap(geo, ['Staying in Pune, India', 'I am open to anywhere']),
+          {'I am open to anywhere'});
+      expect(tap(geo, ['Not sure yet', 'Abroad']), {'Abroad'});
+    });
+
+    test('"nobody but me" rules out everyone else', () {
+      final who = q(ChatCategory.financial, 'fin_stakeholders',
+          profile: const {'living_situation': 'With my parents or family'});
+      expect(tap(who, ['My parents or family', 'Nobody but me']),
+          {'Nobody but me'});
+      expect(tap(who, ['Nobody but me', 'Someone else']), {'Someone else'});
+    });
+
+    test('every question is single or multi for a reason', () {
+      // Re-derived by asking of each: can more than one of these be true of
+      // me at once? One answer where the options are points on one scale, or
+      // the one decision later questions depend on.
+      const expected = {
+        ChatCategory.relationship: {
+          'rel_who': true,
+          'rel_whats_wrong': true,
+          'rel_decision': false,
+          'rel_duration': false,
+          'rel_spoken': true,
+          'rel_fear': true,
+        },
+        ChatCategory.education: {
+          'edu_decision': false,
+          'edu_geography': true,
+          'edu_obstacle': true,
+          'edu_stage': false,
+        },
+        ChatCategory.financial: {
+          'fin_decision': false,
+          'fin_scale': false,
+          'fin_urgency': false,
+          'fin_stakeholders': true,
+          'fin_blocker': true,
+        },
+        ChatCategory.other: {
+          'oth_area': true,
+          'oth_shape': false,
+          'oth_urgency': false,
+          'oth_blocker': true,
+        },
+      };
+      expected.forEach((category, ids) {
+        final qs = questionsFor(category, profileWith(const {}));
+        ids.forEach((id, multi) {
+          expect(qs.firstWhere((q) => q.id == id).isMulti, multi, reason: id);
+        });
+      });
+    });
+
+    testWidgets('on screen, ticking one ex-term unticks the other',
+        (tester) async {
+      final userId = await signInWithProfile(tester);
+      await tapCategory(tester, ChatCategory.relationship);
+
+      await choose(tester, 'My ex-girlfriend');
+      await choose(tester, 'My parents or family');
+      await choose(tester, 'My ex-boyfriend');
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      final chat = (await Backend.data.fetchChats(userId)).single;
+      final row = (await Backend.data.fetchMessages(chat.id)).single;
+      expect(row.metadata['selected'],
+          ['My ex-boyfriend', 'My parents or family']);
     });
   });
 

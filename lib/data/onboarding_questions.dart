@@ -175,6 +175,10 @@ const List<OnboardingQuestion> onboardingQuestions = [
       'With my parents or family',
       'On my own',
       'With a partner or spouse',
+      // Its own option rather than making this multi-select: a joint family is
+      // one household, and the common case here — living with a spouse and
+      // their parents — had no honest answer when the two were exclusive.
+      'With my partner and my family',
       'With flatmates',
       'In a hostel or dorm',
     ],
@@ -369,10 +373,17 @@ HouseholdShape householdOf(UserProfile profile) =>
       'With my parents or family' => HouseholdShape.withFamily,
       'On my own' => HouseholdShape.alone,
       'With a partner or spouse' => HouseholdShape.withPartner,
+      // Partner first: they are the likeliest person a decision lands on.
+      'With my partner and my family' => HouseholdShape.withPartner,
       'With flatmates' => HouseholdShape.withFlatmates,
       'In a hostel or dorm' => HouseholdShape.institutional,
       _ => HouseholdShape.unknown,
     };
+
+/// Under 18 — so not offered "My children" as someone a decision is about or
+/// lands on.
+bool isMinor(UserProfile profile) =>
+    onboardingAnswer(profile, 'age_range') == 'Under 18';
 
 /// Whether someone else's money depends on this user's.
 bool supportsOthers(UserProfile profile) =>
