@@ -23,6 +23,17 @@ class ThoughtLoomApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
+      // Desktop browsers: keep the phone layout as a centred column instead of
+      // stretching it. No effect below the 560px cap, so phones are untouched.
+      builder: (context, child) => ColoredBox(
+        color: const Color(0xFFF7F5F0),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: child,
+          ),
+        ),
+      ),
       home: const AuthGate(),
     );
   }
