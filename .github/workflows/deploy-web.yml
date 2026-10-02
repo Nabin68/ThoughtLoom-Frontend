@@ -25,11 +25,16 @@ jobs:
           cache: true
       - run: flutter pub get
       - name: Build
-        run: >
-          flutter build web --release
-          --base-href "/${{ github.event.repository.name }}/"
-          --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-          --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          # Fail loudly instead of shipping a build that silently uses local storage.
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_ANON_KEY secrets are empty or not visible to this job"
+            exit 1
+          fi
+          flutter build web --release             --base-href "/${{ github.event.repository.name }}/"             --dart-define=SUPABASE_URL="$SUPABASE_URL"             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
       # GitHub Pages has no SPA fallback; this makes a stray deep link load the app.
       - run: cp build/web/index.html build/web/404.html
       - uses: actions/upload-pages-artifact@v3
